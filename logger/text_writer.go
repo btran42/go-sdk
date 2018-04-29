@@ -25,8 +25,8 @@ const (
 	DefaultTextWriterShowTimestamp = true
 )
 
-// Asserts text writer is a writer.
 var (
+	// asserts TextWriter implements Writer.
 	_ Writer = &TextWriter{}
 )
 

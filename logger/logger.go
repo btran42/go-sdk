@@ -95,11 +95,6 @@ type Logger struct {
 	workers     map[Flag]map[string]*Worker
 
 	recoverPanics bool
-
-	writeWorkerLock      sync.Mutex
-	writeWorker          *Worker
-	writeErrorWorkerLock sync.Mutex
-	writeErrorWorker     *Worker
 }
 
 // WithHeading returns the logger heading.
@@ -149,8 +144,8 @@ func (l *Logger) Flags() *FlagSet {
 // WithFlags sets the logger flag set.
 func (l *Logger) WithFlags(flags *FlagSet) *Logger {
 	l.flagsLock.Lock()
+	defer l.flagsLock.Unlock()
 	l.flags = flags
-	l.flagsLock.Unlock()
 	return l
 }
 
@@ -158,8 +153,8 @@ func (l *Logger) WithFlags(flags *FlagSet) *Logger {
 // These flags mark events as to be omitted from output.
 func (l *Logger) WithHiddenFlags(flags *FlagSet) *Logger {
 	l.hiddenFlagsLock.Lock()
+	defer l.hiddenFlagsLock.Unlock()
 	l.hiddenFlags = flags
-	l.hiddenFlagsLock.Unlock()
 	return l
 }
 
@@ -213,10 +208,6 @@ func (l *Logger) WithDisabled(flags ...Flag) *Logger {
 
 // Disable flips the bit flag for a given set of events.
 func (l *Logger) Disable(flags ...Flag) {
-	if l.flags == nil {
-		return
-	}
-
 	l.flagsLock.Lock()
 	defer l.flagsLock.Unlock()
 	for _, flag := range flags {
@@ -262,10 +253,6 @@ func (l *Logger) WithHidden(flags ...Flag) *Logger {
 
 // Show allows automatic logging for each event emitted under the provided list of flags.
 func (l *Logger) Show(flags ...Flag) {
-	if l.hiddenFlags == nil {
-		return
-	}
-
 	l.hiddenFlagsLock.Lock()
 	defer l.hiddenFlagsLock.Unlock()
 	for _, flag := range flags {
@@ -275,9 +262,9 @@ func (l *Logger) Show(flags ...Flag) {
 
 // HasListeners returns if there are registered listener for an event.
 func (l *Logger) HasListeners(flag Flag) bool {
-	if l == nil {
-		return false
-	}
+	l.workersLock.Lock()
+	defer l.workersLock.Unlock()
+
 	if l.workers == nil {
 		return false
 	}
@@ -290,9 +277,9 @@ func (l *Logger) HasListeners(flag Flag) bool {
 
 // HasListener returns if a specific listener is registerd for a flag.
 func (l *Logger) HasListener(flag Flag, listenerName string) bool {
-	if l == nil {
-		return false
-	}
+	l.workersLock.Lock()
+	defer l.workersLock.Unlock()
+
 	if l.workers == nil {
 		return false
 	}
@@ -336,12 +323,12 @@ func (l *Logger) Listen(flag Flag, listenerName string, listener Listener) {
 
 // RemoveListeners clears *all* listeners for a Flag.
 func (l *Logger) RemoveListeners(flag Flag) {
+	l.workersLock.Lock()
+	defer l.workersLock.Unlock()
+
 	if l.workers == nil {
 		return
 	}
-
-	l.workersLock.Lock()
-	defer l.workersLock.Unlock()
 
 	listeners, hasListeners := l.workers[flag]
 	if !hasListeners {
@@ -357,12 +344,12 @@ func (l *Logger) RemoveListeners(flag Flag) {
 
 // RemoveListener clears a specific listener for a Flag.
 func (l *Logger) RemoveListener(flag Flag, listenerName string) {
+	l.workersLock.Lock()
+	defer l.workersLock.Unlock()
+
 	if l.workers == nil {
 		return
 	}
-
-	l.workersLock.Lock()
-	defer l.workersLock.Unlock()
 
 	listeners, hasListeners := l.workers[flag]
 	if !hasListeners {
@@ -397,17 +384,12 @@ func (l *Logger) SyncTrigger(e Event) {
 }
 
 func (l *Logger) trigger(async bool, e Event) {
-	if l == nil {
-		return
-	}
-	if e == nil {
-		return
-	}
-	if l.flags == nil {
-		return
-	}
-	if async {
-		l.ensureInitialized()
+	if l.recoverPanics {
+		defer func() {
+			if r := recover(); r != nil {
+				l.WriteError(Errorf(Fatal, "%+v", r))
+			}
+		}()
 	}
 
 	if typed, isTyped := e.(EventEnabled); isTyped && !typed.IsEnabled() {
@@ -417,7 +399,16 @@ func (l *Logger) trigger(async bool, e Event) {
 	flag := e.Flag()
 	if l.IsEnabled(flag) {
 
-		l.injectHeading(e)
+		// inject the logger heading
+		if len(l.heading) > 0 {
+			if typed, isTyped := e.(EventHeadings); isTyped {
+				if len(typed.Headings()) > 0 {
+					typed.SetHeadings(append([]string{l.heading}, typed.Headings()...)...)
+				} else {
+					typed.SetHeadings(l.heading)
+				}
+			}
+		}
 
 		if l.workers != nil {
 			if workers, hasWorkers := l.workers[flag]; hasWorkers {
@@ -425,9 +416,7 @@ func (l *Logger) trigger(async bool, e Event) {
 					if async {
 						worker.Work <- e
 					} else {
-						l.safeExecute(func() {
-							worker.Listener(e)
-						})
+						worker.Listener(e)
 					}
 				}
 			}
@@ -445,34 +434,11 @@ func (l *Logger) trigger(async bool, e Event) {
 
 		// check if the event should be handled by the error outputs
 		if typed, isTyped := e.(EventError); isTyped && typed.IsError() {
-			if async {
-				l.writeErrorWorker.Work <- e
-			} else {
-				l.safeExecute(func() {
-					l.WriteError(e)
-				})
-			}
+			l.WriteError(e)
 		} else {
-			if async {
-				l.writeWorker.Work <- e
-			} else {
-				l.safeExecute(func() {
-					l.Write(e)
-				})
-			}
+			l.Write(e)
 		}
 	}
-}
-
-func (l *Logger) safeExecute(action func()) {
-	if l.recoverPanics {
-		defer func() {
-			if r := recover(); r != nil {
-				l.SyncFatalf("%v", r)
-			}
-		}()
-	}
-	action()
 }
 
 // --------------------------------------------------------------------------------
@@ -481,178 +447,120 @@ func (l *Logger) safeExecute(action func()) {
 
 // Sillyf logs an incredibly verbose message to the output stream.
 func (l *Logger) Sillyf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.Trigger(Messagef(Silly, format, args...))
 }
 
 // SyncSillyf logs an incredibly verbose message to the output stream synchronously.
 func (l *Logger) SyncSillyf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Messagef(Silly, format, args...))
 }
 
 // Infof logs an informational message to the output stream.
 func (l *Logger) Infof(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.Trigger(Messagef(Info, format, args...))
 }
 
 // SyncInfof logs an informational message to the output stream synchronously.
 func (l *Logger) SyncInfof(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Messagef(Info, format, args...))
 }
 
 // Debugf logs a debug message to the output stream.
 func (l *Logger) Debugf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.Trigger(Messagef(Debug, format, args...))
 }
 
 // SyncDebugf logs an debug message to the output stream synchronously.
 func (l *Logger) SyncDebugf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Messagef(Debug, format, args...))
 }
 
 // Warningf logs a debug message to the output stream.
 func (l *Logger) Warningf(format string, args ...interface{}) error {
-	if l == nil {
-		return nil
-	}
 	return l.Warning(fmt.Errorf(format, args...))
 }
 
 // SyncWarningf logs an warning message to the output stream synchronously.
 func (l *Logger) SyncWarningf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Errorf(Warning, format, args...))
 }
 
 // Warning logs a warning error to std err.
 func (l *Logger) Warning(err error) error {
-	if l != nil {
-		l.Trigger(NewErrorEvent(Warning, err))
-	}
+	l.Trigger(NewErrorEvent(Warning, err))
 	return err
 }
 
 // SyncWarning synchronously logs a warning to std err.
 func (l *Logger) SyncWarning(err error) error {
-	if l != nil {
-		l.SyncTrigger(NewErrorEvent(Warning, err))
-	}
+	l.SyncTrigger(NewErrorEvent(Warning, err))
 	return err
 }
 
 // WarningWithReq logs a warning error to std err with a request.
 func (l *Logger) WarningWithReq(err error, req *http.Request) error {
-	if l != nil {
-		l.Trigger(NewErrorEventWithState(Warning, err, req))
-	}
+	l.Trigger(NewErrorEventWithState(Warning, err, req))
 	return err
 }
 
 // Errorf writes an event to the log and triggers event listeners.
 func (l *Logger) Errorf(format string, args ...interface{}) error {
-	if l == nil {
-		return nil
-	}
 	return l.Error(fmt.Errorf(format, args...))
 }
 
 // SyncErrorf synchronously triggers a error.
 func (l *Logger) SyncErrorf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Errorf(Error, format, args...))
 }
 
 // Error logs an error to std err.
 func (l *Logger) Error(err error) error {
-	if l != nil {
-		l.Trigger(NewErrorEvent(Error, err))
-	}
+	l.Trigger(NewErrorEvent(Error, err))
 	return err
 }
 
 // SyncError synchronously logs an error to std err.
 func (l *Logger) SyncError(err error) error {
-	if l != nil {
-		l.SyncTrigger(NewErrorEvent(Error, err))
-	}
+	l.SyncTrigger(NewErrorEvent(Error, err))
 	return err
 }
 
 // ErrorWithReq logs an error to std err with a request.
 func (l *Logger) ErrorWithReq(err error, req *http.Request) error {
-	if l != nil {
-		l.Trigger(NewErrorEventWithState(Error, err, req))
-	}
+	l.Trigger(NewErrorEventWithState(Error, err, req))
 	return err
 }
 
 // Fatalf writes an event to the log and triggers event listeners.
 func (l *Logger) Fatalf(format string, args ...interface{}) error {
-	if l == nil {
-		return nil
-	}
 	return l.Fatal(fmt.Errorf(format, args...))
 }
 
 // SyncFatalf synchronously triggers a fatal.
 func (l *Logger) SyncFatalf(format string, args ...interface{}) {
-	if l == nil {
-		return
-	}
 	l.SyncTrigger(Errorf(Fatal, format, args...))
 }
 
 // Fatal logs the result of a panic to std err.
 func (l *Logger) Fatal(err error) error {
-	if l != nil {
-		l.Trigger(NewErrorEvent(Fatal, err))
-	}
+	l.Trigger(NewErrorEvent(Fatal, err))
 	return err
 }
 
 // SyncFatal synchronously logs a fatal to std err.
 func (l *Logger) SyncFatal(err error) error {
-	if l != nil {
-		l.SyncTrigger(NewErrorEvent(Fatal, err))
-	}
+	l.SyncTrigger(NewErrorEvent(Fatal, err))
 	return err
 }
 
 // FatalWithReq logs the result of a fatal error to std err with a request.
 func (l *Logger) FatalWithReq(err error, req *http.Request) error {
-	if l != nil {
-		l.Trigger(NewErrorEventWithState(Fatal, err, req))
-	}
+	l.Trigger(NewErrorEventWithState(Fatal, err, req))
 	return err
 }
 
 // SyncFatalExit logs the result of a fatal error to std err and calls `exit(1)`
 func (l *Logger) SyncFatalExit(err error) {
-	if l == nil || l.flags == nil {
-		os.Exit(1)
-	}
-
 	l.Fatal(err)
 	l.Drain()
 	os.Exit(1)
@@ -660,19 +568,15 @@ func (l *Logger) SyncFatalExit(err error) {
 
 // Write writes an event synchronously to the writer.
 func (l *Logger) Write(e Event) {
-	if len(l.writers) > 0 {
-		for _, writer := range l.writers {
-			writer.Write(e)
-		}
+	for _, writer := range l.writers {
+		writer.Write(e)
 	}
 }
 
 // WriteError writes an event synchronously to the error writer.
 func (l *Logger) WriteError(e Event) {
-	if len(l.writers) > 0 {
-		for _, writer := range l.writers {
-			writer.WriteError(e)
-		}
+	for _, writer := range l.writers {
+		writer.WriteError(e)
 	}
 }
 
@@ -682,9 +586,6 @@ func (l *Logger) WriteError(e Event) {
 
 // Close releases shared resources for the agent.
 func (l *Logger) Close() (err error) {
-	if l == nil {
-		return nil
-	}
 	l.flagsLock.Lock()
 	defer l.flagsLock.Unlock()
 
@@ -701,27 +602,16 @@ func (l *Logger) Close() (err error) {
 		}
 	}
 
-	if l.writeWorker != nil {
-		l.writeWorkerLock.Lock()
-		defer l.writeWorkerLock.Unlock()
-		l.writeWorker.Close()
+	for key := range l.workers {
+		delete(l.workers, key)
 	}
-
-	if l.writeErrorWorker != nil {
-		l.writeErrorWorkerLock.Lock()
-		defer l.writeErrorWorkerLock.Unlock()
-		l.writeErrorWorker.Close()
-	}
+	l.workers = nil
 
 	return nil
 }
 
 // Drain waits for the agent to finish its queue of events before closing.
 func (l *Logger) Drain() error {
-	if l == nil {
-		return nil
-	}
-
 	l.workersLock.Lock()
 	defer l.workersLock.Unlock()
 
@@ -731,55 +621,5 @@ func (l *Logger) Drain() error {
 		}
 	}
 
-	if l.writeWorker != nil {
-		l.writeWorkerLock.Lock()
-		defer l.writeWorkerLock.Unlock()
-		l.writeWorker.Drain()
-	}
-
-	if l.writeErrorWorker != nil {
-		l.writeErrorWorkerLock.Lock()
-		defer l.writeErrorWorkerLock.Unlock()
-		l.writeErrorWorker.Drain()
-	}
-
 	return nil
-}
-
-// --------------------------------------------------------------------------------
-// write helpers
-// --------------------------------------------------------------------------------
-
-// injectHeading injects the sub-context's headings into an event if it supports headings.
-func (l *Logger) injectHeading(e Event) {
-	if len(l.heading) > 0 {
-		if typed, isTyped := e.(EventHeadings); isTyped {
-			if len(typed.Headings()) > 0 {
-				typed.SetHeadings(append([]string{l.heading}, typed.Headings()...)...)
-			} else {
-				typed.SetHeadings(l.heading)
-			}
-		}
-	}
-}
-
-func (l *Logger) ensureInitialized() {
-	if l.writeWorker == nil {
-		l.writeWorkerLock.Lock()
-		defer l.writeWorkerLock.Unlock()
-
-		if l.writeWorker == nil {
-			l.writeWorker = NewWorker(l, l.Write).WithRecoverPanics(l.recoverPanics)
-			l.writeWorker.Start()
-		}
-	}
-	if l.writeErrorWorker == nil {
-		l.writeErrorWorkerLock.Lock()
-		defer l.writeErrorWorkerLock.Unlock()
-
-		if l.writeErrorWorker == nil {
-			l.writeErrorWorker = NewWorker(l, l.WriteError).WithRecoverPanics(l.recoverPanics)
-			l.writeErrorWorker.Start()
-		}
-	}
 }

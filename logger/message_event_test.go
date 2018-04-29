@@ -13,7 +13,7 @@ func TestMessageEventListener(t *testing.T) {
 	assert := assert.New(t)
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(4)
 
 	textBuffer := bytes.NewBuffer(nil)
 	jsonBuffer := bytes.NewBuffer(nil)
@@ -28,8 +28,8 @@ func TestMessageEventListener(t *testing.T) {
 		assert.Equal("foo bar", e.Message())
 	}))
 
-	go func() { all.Trigger(Messagef(Flag("test-flag"), "foo %s", "bar")) }()
-	go func() { all.Trigger(Messagef(Flag("test-flag"), "foo %s", "bar")) }()
+	go func() { defer wg.Done(); all.Trigger(Messagef(Flag("test-flag"), "foo %s", "bar")) }()
+	go func() { defer wg.Done(); all.Trigger(Messagef(Flag("test-flag"), "foo %s", "bar")) }()
 	wg.Wait()
 	all.Drain()
 

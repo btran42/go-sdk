@@ -12,16 +12,17 @@ import (
 func TestAuditEventListener(t *testing.T) {
 	assert := assert.New(t)
 
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
 	textBuffer := bytes.NewBuffer(nil)
 	jsonBuffer := bytes.NewBuffer(nil)
+
 	all := New().WithFlags(AllFlags()).
 		WithRecoverPanics(false).
 		WithWriter(NewTextWriter(textBuffer)).
 		WithWriter(NewJSONWriter(jsonBuffer))
 	defer all.Close()
+
+	wg := sync.WaitGroup{}
+	wg.Add(4)
 
 	all.Listen(Audit, "default", NewAuditEventListener(func(e *AuditEvent) {
 		defer wg.Done()
@@ -32,6 +33,7 @@ func TestAuditEventListener(t *testing.T) {
 	}))
 
 	go func() {
+		defer wg.Done()
 		all.Trigger(NewAuditEvent("principal", "verb", "noun").
 			WithSubject("subject").
 			WithProperty("property").
@@ -40,6 +42,7 @@ func TestAuditEventListener(t *testing.T) {
 			WithExtra(Labels{"foo": "bar"}))
 	}()
 	go func() {
+		defer wg.Done()
 		all.Trigger(NewAuditEvent("principal", "verb", "noun").
 			WithSubject("subject").
 			WithProperty("property").

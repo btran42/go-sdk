@@ -15,8 +15,6 @@ func NewWorker(parent *Logger, listener Listener) *Worker {
 		Parent:        parent,
 		Listener:      listener,
 		Work:          make(chan Event, DefaultWorkerQueueDepth),
-		Abort:         make(chan bool),
-		Aborted:       make(chan bool),
 		RecoverPanics: true,
 	}
 }
@@ -25,9 +23,8 @@ func NewWorker(parent *Logger, listener Listener) *Worker {
 type Worker struct {
 	Parent        *Logger
 	Listener      Listener
-	Abort         chan bool
-	Aborted       chan bool
-	Drained       chan bool
+	Abort         chan struct{}
+	Aborted       chan struct{}
 	Work          chan Event
 	SyncRoot      sync.Mutex
 	RecoverPanics bool
@@ -41,6 +38,8 @@ func (w *Worker) WithRecoverPanics(value bool) *Worker {
 
 // Start starts the worker.
 func (w *Worker) Start() {
+	w.Abort = make(chan struct{})
+	w.Aborted = make(chan struct{})
 	go w.ProcessLoop()
 }
 
@@ -52,7 +51,7 @@ func (w *Worker) ProcessLoop() {
 		case e = <-w.Work:
 			w.Process(e)
 		case <-w.Abort:
-			w.Aborted <- true
+			close(w.Aborted)
 			return
 		}
 	}
@@ -64,18 +63,17 @@ func (w *Worker) Process(e Event) {
 		defer func() {
 			if r := recover(); r != nil {
 				if w.Parent != nil {
-					w.Parent.SyncFatalf("%v", r)
+					w.Parent.SyncFatalf("%+v", r)
 				}
 			}
 		}()
 	}
-
 	w.Listener(e)
 }
 
 // Stop stops the worker.
 func (w *Worker) Stop() {
-	w.Abort <- true
+	close(w.Abort)
 	<-w.Aborted
 }
 
@@ -98,10 +96,9 @@ func (w *Worker) Close() error {
 	defer w.SyncRoot.Unlock()
 
 	w.Stop()
-
+	for len(w.Work) > 0 {
+		w.Process(<-w.Work)
+	}
 	close(w.Work)
-	close(w.Abort)
-	close(w.Aborted)
-
 	return nil
 }

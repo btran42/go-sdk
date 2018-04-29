@@ -15,7 +15,7 @@ func TestErrorEventListener(t *testing.T) {
 	assert := assert.New(t)
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(4)
 
 	textBuffer := bytes.NewBuffer(nil)
 	jsonBuffer := bytes.NewBuffer(nil)
@@ -31,8 +31,8 @@ func TestErrorEventListener(t *testing.T) {
 		assert.Equal("foo bar", e.Err().Error())
 	}))
 
-	go func() { all.Trigger(NewErrorEvent(Fatal, fmt.Errorf("foo bar"))) }()
-	go func() { all.Trigger(NewErrorEvent(Fatal, fmt.Errorf("foo bar"))) }()
+	go func() { defer wg.Done(); all.Trigger(NewErrorEvent(Fatal, fmt.Errorf("foo bar"))) }()
+	go func() { defer wg.Done(); all.Trigger(NewErrorEvent(Fatal, fmt.Errorf("foo bar"))) }()
 	wg.Wait()
 	all.Drain()
 

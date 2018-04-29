@@ -14,7 +14,7 @@ func TestQueryEventListener(t *testing.T) {
 	assert := assert.New(t)
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(4)
 
 	textBuffer := bytes.NewBuffer(nil)
 	jsonBuffer := bytes.NewBuffer(nil)
@@ -31,8 +31,8 @@ func TestQueryEventListener(t *testing.T) {
 		assert.Equal("foo bar", e.Body())
 	}))
 
-	go func() { all.Trigger(NewQueryEvent("foo bar", time.Second).WithQueryLabel("moo")) }()
-	go func() { all.Trigger(NewQueryEvent("foo bar", time.Second).WithQueryLabel("moo")) }()
+	go func() { defer wg.Done(); all.Trigger(NewQueryEvent("foo bar", time.Second).WithQueryLabel("moo")) }()
+	go func() { defer wg.Done(); all.Trigger(NewQueryEvent("foo bar", time.Second).WithQueryLabel("moo")) }()
 	wg.Wait()
 	all.Drain()
 

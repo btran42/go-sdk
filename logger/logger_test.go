@@ -772,8 +772,8 @@ func TestLoggerPanicOnWrite(t *testing.T) {
 	all := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer))
 	event := &panics{}
 	all.Trigger(event)
-	all.Drain()
 	defer all.Close()
+	all.Drain()
 
 	assert.True(event.didRun, "The event should have triggered.")
 	assert.NotEmpty(buffer.String())

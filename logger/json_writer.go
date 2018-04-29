@@ -70,10 +70,12 @@ func NewJSONWriterFromConfig(cfg *JSONWriterConfig) *JSONWriter {
 
 // JSONWriter is a json output format.
 type JSONWriter struct {
-	output           io.Writer
-	errorOutput      io.Writer
-	pretty           bool
-	includeTimestamp bool
+	output             io.Writer
+	errorOutput        io.Writer
+	outputEncoder      *json.Encoder
+	errorOutputEncoder *json.Encoder
+	pretty             bool
+	includeTimestamp   bool
 }
 
 // OutputFormat returns the output format.

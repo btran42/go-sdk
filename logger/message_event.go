@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 )
@@ -84,7 +85,7 @@ func (e *MessageEvent) Message() string {
 }
 
 // WriteText implements TextWritable.
-func (e *MessageEvent) WriteText(formatter TextFormatter, buf Buffer) {
+func (e *MessageEvent) WriteText(formatter TextFormatter, buf *bytes.Buffer) {
 	buf.WriteString(e.message)
 }
 

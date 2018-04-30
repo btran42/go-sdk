@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -120,7 +121,7 @@ func (e *ErrorEvent) State() Any {
 }
 
 // WriteText implements TextWritable.
-func (e *ErrorEvent) WriteText(formatter TextFormatter, buf Buffer) {
+func (e *ErrorEvent) WriteText(formatter TextFormatter, buf *bytes.Buffer) {
 	buf.WriteString(fmt.Sprintf("%+v", e.err))
 }
 

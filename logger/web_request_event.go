@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"net/http"
 	"time"
 )
@@ -171,7 +172,7 @@ func (e *WebRequestEvent) State() map[string]interface{} {
 }
 
 // WriteText implements TextWritable.
-func (e *WebRequestEvent) WriteText(formatter TextFormatter, buf Buffer) {
+func (e *WebRequestEvent) WriteText(formatter TextFormatter, buf *bytes.Buffer) {
 	if e.flag == WebRequestStart {
 		TextWriteRequestStart(formatter, buf, e.req)
 	} else {

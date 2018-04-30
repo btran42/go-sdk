@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -31,7 +32,7 @@ var (
 
 // TextWritable is a type with a custom formater for text writing.
 type TextWritable interface {
-	WriteText(formatter TextFormatter, buf Buffer)
+	WriteText(formatter TextFormatter, buf *bytes.Buffer)
 }
 
 // FlagTextColorProvider is a function types can implement to provide a color.
@@ -227,13 +228,13 @@ func (wr *TextWriter) FormatTimestamp(optionalTime ...time.Time) string {
 }
 
 // GetBuffer returns a leased buffer from the buffer pool.
-func (wr *TextWriter) GetBuffer() Buffer {
+func (wr *TextWriter) GetBuffer() *bytes.Buffer {
 	return wr.bufferPool.Get()
 }
 
 // PutBuffer adds the leased buffer back to the pool.
 // It Should be called in conjunction with `GetBuffer`.
-func (wr *TextWriter) PutBuffer(buffer Buffer) {
+func (wr *TextWriter) PutBuffer(buffer *bytes.Buffer) {
 	wr.bufferPool.Put(buffer)
 }
 

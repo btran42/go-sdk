@@ -390,7 +390,7 @@ func (l *Logger) SyncTrigger(e Event) {
 }
 
 func (l *Logger) trigger(async bool, e Event) {
-	if !async && l.recoverPanics {
+	/*if !async && l.recoverPanics {
 		defer func() {
 			if r := recover(); r != nil {
 				l.Write(Errorf(Fatal, "%+v", r))
@@ -442,7 +442,8 @@ func (l *Logger) trigger(async bool, e Event) {
 		} else {
 			l.Write(e)
 		}
-	}
+	}*/
+	l.writeWorker.Work <- e
 }
 
 // --------------------------------------------------------------------------------

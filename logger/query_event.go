@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -141,7 +142,7 @@ func (e QueryEvent) Err() error {
 }
 
 // WriteText writes the event text to the output.
-func (e QueryEvent) WriteText(tf TextFormatter, buf Buffer) {
+func (e QueryEvent) WriteText(tf TextFormatter, buf *bytes.Buffer) {
 	var format string
 	if e.err == nil {
 		format = "[%s] (%v)"

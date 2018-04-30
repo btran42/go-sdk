@@ -130,8 +130,8 @@ func main() {
 	http.HandleFunc("/bench/zap", zapLogged(zl, indexHandler))
 	http.HandleFunc("/bench/stdout", stdoutLogged(indexHandler))
 
-	logger.Default().Infof("Listening on :%s", port())
-	logger.Default().Infof("Events %s", log.Flags().String())
+	log.Infof("Listening on :%s", port())
+	log.Infof("Events %s", log.Flags().String())
 
 	log.SyncFatalExit(http.ListenAndServe(":"+port(), nil))
 }

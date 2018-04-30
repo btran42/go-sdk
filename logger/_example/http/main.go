@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -39,7 +41,7 @@ func zapLogged(zl *zap.Logger, handler http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func stdoutLogged(handler http.HandlerFunc) http.HandlerFunc {
+func stdoutLogged(out io.Writer, handler http.HandlerFunc) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		start := time.Now()
 		rw := logger.NewResponseWriter(res)
@@ -60,7 +62,8 @@ func stdoutLogged(handler http.HandlerFunc) http.HandlerFunc {
 		buf.WriteRune(logger.RuneSpace)
 		buf.WriteString(logger.FormatFileSize(int64(rw.ContentLength())))
 		buf.WriteRune(logger.RuneNewline)
-		os.Stdout.Write(buf.Bytes())
+		out.Write(buf.Bytes())
+
 		pool.Put(buf)
 	}
 }
@@ -128,7 +131,7 @@ func main() {
 
 	http.HandleFunc("/bench/logged", logged(log, indexHandler))
 	http.HandleFunc("/bench/zap", zapLogged(zl, indexHandler))
-	http.HandleFunc("/bench/stdout", stdoutLogged(indexHandler))
+	http.HandleFunc("/bench/stdout", stdoutLogged(logger.NewInterlockedWriter(bufio.NewWriterSize(os.Stdout, 4096)), indexHandler))
 
 	log.Infof("Listening on :%s", port())
 	log.Infof("Events %s", log.Flags().String())

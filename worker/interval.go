@@ -5,8 +5,10 @@ import "time"
 // NewInterval returns a new worker that runs an action on an interval.
 func NewInterval(action func() error, interval time.Duration) *Interval {
 	return &Interval{
-		interval: interval,
-		action:   action,
+		interval:   interval,
+		action:     action,
+		timeSource: SystemTimeSource{},
+		latch:      &Latch{},
 	}
 }
 
@@ -16,7 +18,7 @@ type Interval struct {
 	interval   time.Duration
 	timeSource TimeSource
 	action     func() error
-	latch      Latch
+	latch      *Latch
 	errors     chan error
 }
 
@@ -37,7 +39,7 @@ func (i Interval) Interval() time.Duration {
 }
 
 // Latch returns the inteval worker latch.
-func (i *Interval) Latch() Latch {
+func (i *Interval) Latch() *Latch {
 	return i.latch
 }
 
@@ -77,10 +79,7 @@ func (i *Interval) TimeSource() TimeSource {
 
 // Start starts the worker.
 func (i *Interval) Start() {
-	if i.latch.IsRunning() {
-		return
-	}
-	if i.latch.IsStarting() {
+	if !i.latch.CanStart() {
 		return
 	}
 
@@ -112,7 +111,7 @@ func (i *Interval) Start() {
 
 // Stop stops the worker.
 func (i *Interval) Stop() {
-	if !i.latch.IsRunning() {
+	if !i.latch.CanStop() {
 		return
 	}
 	i.latch.Stop()

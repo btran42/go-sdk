@@ -15,6 +15,7 @@ func NewAutoflushBuffer(maxLen int, interval time.Duration) *AutoflushBuffer {
 		interval:     interval,
 		flushOnAbort: true,
 		contents:     collections.NewRingBufferWithCapacity(maxLen),
+		latch:        &Latch{},
 	}
 }
 
@@ -32,7 +33,7 @@ type AutoflushBuffer struct {
 	flushOnAbort bool
 	handler      func(obj []Any)
 
-	latch Latch
+	latch *Latch
 }
 
 // WithFlushOnAbort sets if we should flush on aborts or not.
@@ -76,6 +77,9 @@ func (ab *AutoflushBuffer) WithFlushHandler(handler func(objs []Any)) *Autoflush
 
 // Start starts the buffer flusher.
 func (ab *AutoflushBuffer) Start() {
+	if !ab.latch.CanStart() {
+		return
+	}
 	ab.latch.Starting()
 	go func() {
 		ab.latch.Started()
@@ -86,6 +90,9 @@ func (ab *AutoflushBuffer) Start() {
 
 // Stop stops the buffer flusher.
 func (ab *AutoflushBuffer) Stop() {
+	if !ab.latch.CanStop() {
+		return
+	}
 	ab.latch.Stop()
 }
 

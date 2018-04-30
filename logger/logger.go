@@ -32,21 +32,24 @@ func FatalExit(err error) {
 
 // New returns a new logger with a given set of enabled flags, without a writer provisioned.
 func New(flags ...Flag) *Logger {
-	return &Logger{
+	l := &Logger{
 		recoverPanics: DefaultRecoverPanics,
 		flags:         NewFlagSet(flags...),
 	}
+	l.writeWorker = NewWorker(l, l.Write).WithRecoverPanics(l.RecoversPanics())
+	l.writeWorker.Start()
+	return l
 }
 
 // NewFromConfig returns a new logger from a config.
 func NewFromConfig(cfg *Config) *Logger {
-	return &Logger{
-		heading:       cfg.GetHeading(),
-		recoverPanics: cfg.GetRecoverPanics(),
-		flags:         NewFlagSetFromValues(cfg.GetFlags()...),
-		hiddenFlags:   NewFlagSetFromValues(cfg.GetHiddenFlags()...),
-		writers:       cfg.GetWriters(),
-	}
+	return New().
+		WithHeading(cfg.GetHeading()).
+		WithRecoverPanics(cfg.GetRecoverPanics()).
+		WithFlags(NewFlagSetFromValues(cfg.GetFlags()...)).
+		WithHiddenFlags(NewFlagSetFromValues(cfg.GetHiddenFlags()...)).
+		WithWriters(cfg.GetWriters()...)
+
 }
 
 // NewFromEnv returns a new agent with settings read from the environment,
@@ -93,6 +96,9 @@ type Logger struct {
 
 	workersLock sync.Mutex
 	workers     map[Flag]map[string]*Worker
+
+	writeWorkerLock sync.Mutex
+	writeWorker     *Worker
 
 	recoverPanics bool
 }
@@ -384,14 +390,10 @@ func (l *Logger) SyncTrigger(e Event) {
 }
 
 func (l *Logger) trigger(async bool, e Event) {
-	l.Write(e)
-}
-
-func (l *Logger) triggerSlow(async bool, e Event) {
-	if l.recoverPanics {
+	if !async && l.recoverPanics {
 		defer func() {
 			if r := recover(); r != nil {
-				l.WriteError(Errorf(Fatal, "%+v", r))
+				l.Write(Errorf(Fatal, "%+v", r))
 			}
 		}()
 	}
@@ -402,9 +404,8 @@ func (l *Logger) triggerSlow(async bool, e Event) {
 
 	flag := e.Flag()
 	if l.IsEnabled(flag) {
-
 		// inject the logger heading
-		if len(l.heading) > 0 {
+		if l.heading != "" {
 			if typed, isTyped := e.(EventHeadings); isTyped {
 				if len(typed.Headings()) > 0 {
 					typed.SetHeadings(append([]string{l.heading}, typed.Headings()...)...)
@@ -436,9 +437,8 @@ func (l *Logger) triggerSlow(async bool, e Event) {
 			return
 		}
 
-		// check if the event should be handled by the error outputs
-		if typed, isTyped := e.(EventError); isTyped && typed.IsError() {
-			l.WriteError(e)
+		if async {
+			l.writeWorker.Work <- e
 		} else {
 			l.Write(e)
 		}
@@ -570,19 +570,17 @@ func (l *Logger) SyncFatalExit(err error) {
 	os.Exit(1)
 }
 
-// Write writes an event synchronously to the writer.
+// Write writes an event synchronously to the writer either as a normal even or as an error.
 func (l *Logger) Write(e Event) {
 	ll := len(l.writers)
+	if typed, isTyped := e.(EventError); isTyped && typed.IsError() {
+		for index := 0; index < ll; index++ {
+			l.writers[index].WriteError(e)
+		}
+		return
+	}
 	for index := 0; index < ll; index++ {
 		l.writers[index].Write(e)
-	}
-}
-
-// WriteError writes an event synchronously to the error writer.
-func (l *Logger) WriteError(e Event) {
-	ll := len(l.writers)
-	for index := 0; index < ll; index++ {
-		l.writers[index].WriteError(e)
 	}
 }
 
@@ -613,6 +611,13 @@ func (l *Logger) Close() (err error) {
 	}
 	l.workers = nil
 
+	if l.writeWorker != nil {
+		l.writeWorkerLock.Lock()
+		defer l.writeWorkerLock.Unlock()
+		l.writeWorker.Close()
+		l.writeWorker = nil
+	}
+
 	return nil
 }
 
@@ -624,6 +629,13 @@ func (l *Logger) Drain() error {
 	for _, workers := range l.workers {
 		for _, worker := range workers {
 			worker.Drain()
+		}
+	}
+	if l.writeWorker != nil {
+		l.writeWorkerLock.Lock()
+		defer l.writeWorkerLock.Unlock()
+		if l.writeWorker != nil {
+			l.writeWorker.Drain()
 		}
 	}
 	return nil

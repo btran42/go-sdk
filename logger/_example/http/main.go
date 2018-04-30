@@ -19,7 +19,6 @@ func logged(log *logger.Logger, handler http.HandlerFunc) http.HandlerFunc {
 		start := time.Now()
 		rw := logger.NewResponseWriter(res)
 		handler(rw, req)
-
 		log.Trigger(logger.NewWebRequestEvent(req).WithStatusCode(rw.StatusCode()).WithContentLength(int64(rw.ContentLength())).WithElapsed(time.Now().Sub(start)))
 	}
 }

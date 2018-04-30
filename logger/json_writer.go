@@ -42,8 +42,10 @@ type JSONWritable interface {
 
 // NewJSONWriter returns a json writer with defaults.
 func NewJSONWriter(output io.Writer) *JSONWriter {
+	syncOuptut := NewInterlockedWriter(output)
 	return &JSONWriter{
-		output:           NewInterlockedWriter(output),
+		output:           syncOuptut,
+		encoder:          json.NewEncoder(syncOuptut),
 		pretty:           DefaultJSONWriterPretty,
 		includeTimestamp: DefaultJSONIncludeTimestamp,
 	}
@@ -127,6 +129,12 @@ func (jw *JSONWriter) Pretty() bool {
 
 // WithPretty sets if we should indent output.
 func (jw *JSONWriter) WithPretty(pretty bool) *JSONWriter {
+	if pretty {
+		jw.encoder.SetIndent("", "\t")
+		if jw.errorEncoder != nil {
+			jw.errorEncoder.SetIndent("", "\t")
+		}
+	}
 	jw.pretty = pretty
 	return jw
 }

@@ -63,7 +63,7 @@ func (w *Worker) Process(e Event) {
 		defer func() {
 			if r := recover(); r != nil {
 				if w.Parent != nil {
-					w.Parent.SyncFatalf("%+v", r)
+					w.Parent.Write(Errorf(Fatal, "%+v", r))
 				}
 			}
 		}()

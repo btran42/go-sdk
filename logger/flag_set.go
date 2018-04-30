@@ -8,13 +8,16 @@ import (
 
 // NewFlagSet returns a new FlagSet with the given flags enabled.
 func NewFlagSet(flags ...Flag) *FlagSet {
-	efs := &FlagSet{
-		flags: make(map[Flag]bool),
+	if len(flags) > 0 {
+		efs := &FlagSet{
+			flags: make(map[Flag]bool),
+		}
+		for _, flag := range flags {
+			efs.Enable(flag)
+		}
+		return efs
 	}
-	for _, flag := range flags {
-		efs.Enable(flag)
-	}
-	return efs
+	return &FlagSet{}
 }
 
 // NewFlagSetAll returns a new FlagSet with all flags enabled.

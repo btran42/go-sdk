@@ -9,7 +9,7 @@ import (
 func TestDefault(t *testing.T) {
 	assert := assert.New(t)
 
-	assert.Nil(Default())
+	assert.NotNil(Default())
 	SetDefault(None())
 	assert.NotNil(Default())
 }

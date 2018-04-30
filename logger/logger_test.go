@@ -770,6 +770,7 @@ func TestLoggerPanicOnWrite(t *testing.T) {
 
 	buffer := bytes.NewBuffer(nil)
 	all := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer))
+	assert.True(all.RecoversPanics())
 	event := &panics{}
 	all.Trigger(event)
 	defer all.Close()
@@ -785,7 +786,9 @@ func TestLoggerPanicOnSyncWrite(t *testing.T) {
 	buffer := bytes.NewBuffer(nil)
 	all := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer))
 	event := &panics{}
+	assert.True(all.RecoversPanics())
 	all.SyncTrigger(event)
+
 	assert.True(event.didRun, "The event should have triggered.")
 	assert.NotEmpty(buffer.String())
 }

@@ -20,8 +20,7 @@ func NewFlagSet(flags ...Flag) *FlagSet {
 // NewFlagSetAll returns a new FlagSet with all flags enabled.
 func NewFlagSetAll() *FlagSet {
 	return &FlagSet{
-		flags: make(map[Flag]bool),
-		all:   true,
+		all: true,
 	}
 }
 
@@ -33,8 +32,7 @@ func AllFlags() *FlagSet {
 // NewFlagSetNone returns a new FlagSet with no flags enabled.
 func NewFlagSetNone() *FlagSet {
 	return &FlagSet{
-		flags: make(map[Flag]bool),
-		none:  true,
+		none: true,
 	}
 }
 
@@ -90,6 +88,9 @@ type FlagSet struct {
 
 // Enable enables an event flag.
 func (efs *FlagSet) Enable(flag Flag) {
+	if efs.flags == nil {
+		efs.flags = map[Flag]bool{}
+	}
 	efs.none = false
 	efs.flags[flag] = true
 }
@@ -104,6 +105,9 @@ func (efs *FlagSet) WithEnabled(flags ...Flag) *FlagSet {
 
 // Disable disables a flag.
 func (efs *FlagSet) Disable(flag Flag) {
+	if efs.flags == nil {
+		efs.flags = map[Flag]bool{}
+	}
 	efs.flags[flag] = false
 }
 
@@ -130,7 +134,7 @@ func (efs *FlagSet) All() bool {
 // It also disables the `all` bit.
 func (efs *FlagSet) SetNone() {
 	efs.all = false
-	efs.flags = map[Flag]bool{}
+	efs.flags = nil
 	efs.none = true
 }
 
@@ -143,8 +147,10 @@ func (efs *FlagSet) None() bool {
 func (efs FlagSet) IsEnabled(flag Flag) bool {
 	if efs.all {
 		// figure out if we explicitly disabled the flag.
-		if enabled, hasEvent := efs.flags[flag]; hasEvent && !enabled {
-			return false
+		if efs.flags != nil {
+			if enabled, hasEvent := efs.flags[flag]; hasEvent && !enabled {
+				return false
+			}
 		}
 		return true
 	}
@@ -168,14 +174,16 @@ func (efs FlagSet) String() string {
 	if efs.all {
 		flags = []string{string(FlagAll)}
 	}
-	for key, enabled := range efs.flags {
-		if key != FlagAll {
-			if enabled {
-				if !efs.all {
-					flags = append(flags, string(key))
+	if efs.flags != nil {
+		for key, enabled := range efs.flags {
+			if key != FlagAll {
+				if enabled {
+					if !efs.all {
+						flags = append(flags, string(key))
+					}
+				} else {
+					flags = append(flags, "-"+string(key))
 				}
-			} else {
-				flags = append(flags, "-"+string(key))
 			}
 		}
 	}
@@ -189,6 +197,9 @@ func (efs *FlagSet) CoalesceWith(other *FlagSet) {
 	}
 	if other.none {
 		efs.none = true
+	}
+	if efs.flags == nil {
+		efs.flags = map[Flag]bool{}
 	}
 	for key, value := range other.flags {
 		efs.flags[key] = value

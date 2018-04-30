@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"bytes"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,7 +19,7 @@ func FormatFileSize(sizeBytes int64) string {
 }
 
 // TextWriteRequestStart is a helper method to write request start events to a writer.
-func TextWriteRequestStart(tf TextFormatter, buf *bytes.Buffer, req *http.Request) {
+func TextWriteRequestStart(tf TextFormatter, buf Buffer, req *http.Request) {
 	buf.WriteString(GetIP(req))
 	buf.WriteRune(RuneSpace)
 	buf.WriteString(tf.Colorize(req.Method, ColorBlue))
@@ -29,7 +28,7 @@ func TextWriteRequestStart(tf TextFormatter, buf *bytes.Buffer, req *http.Reques
 }
 
 // TextWriteRequest is a helper method to write request complete events to a writer.
-func TextWriteRequest(tf TextFormatter, buf *bytes.Buffer, req *http.Request, statusCode int, contentLength int64, contentType string, elapsed time.Duration) {
+func TextWriteRequest(tf TextFormatter, buf Buffer, req *http.Request, statusCode int, contentLength int64, contentType string, elapsed time.Duration) {
 	buf.WriteString(GetIP(req))
 	buf.WriteRune(RuneSpace)
 	buf.WriteString(tf.Colorize(req.Method, ColorBlue))

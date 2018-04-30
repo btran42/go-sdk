@@ -384,6 +384,10 @@ func (l *Logger) SyncTrigger(e Event) {
 }
 
 func (l *Logger) trigger(async bool, e Event) {
+	l.Write(e)
+}
+
+func (l *Logger) triggerSlow(async bool, e Event) {
 	if l.recoverPanics {
 		defer func() {
 			if r := recover(); r != nil {
@@ -447,32 +451,32 @@ func (l *Logger) trigger(async bool, e Event) {
 
 // Sillyf logs an incredibly verbose message to the output stream.
 func (l *Logger) Sillyf(format string, args ...interface{}) {
-	l.Trigger(Messagef(Silly, format, args...))
+	l.trigger(true, Messagef(Silly, format, args...))
 }
 
 // SyncSillyf logs an incredibly verbose message to the output stream synchronously.
 func (l *Logger) SyncSillyf(format string, args ...interface{}) {
-	l.SyncTrigger(Messagef(Silly, format, args...))
+	l.trigger(false, Messagef(Silly, format, args...))
 }
 
 // Infof logs an informational message to the output stream.
 func (l *Logger) Infof(format string, args ...interface{}) {
-	l.Trigger(Messagef(Info, format, args...))
+	l.trigger(true, Messagef(Info, format, args...))
 }
 
 // SyncInfof logs an informational message to the output stream synchronously.
 func (l *Logger) SyncInfof(format string, args ...interface{}) {
-	l.SyncTrigger(Messagef(Info, format, args...))
+	l.trigger(false, Messagef(Info, format, args...))
 }
 
 // Debugf logs a debug message to the output stream.
 func (l *Logger) Debugf(format string, args ...interface{}) {
-	l.Trigger(Messagef(Debug, format, args...))
+	l.trigger(true, Messagef(Debug, format, args...))
 }
 
 // SyncDebugf logs an debug message to the output stream synchronously.
 func (l *Logger) SyncDebugf(format string, args ...interface{}) {
-	l.SyncTrigger(Messagef(Debug, format, args...))
+	l.trigger(false, Messagef(Debug, format, args...))
 }
 
 // Warningf logs a debug message to the output stream.
@@ -482,24 +486,24 @@ func (l *Logger) Warningf(format string, args ...interface{}) error {
 
 // SyncWarningf logs an warning message to the output stream synchronously.
 func (l *Logger) SyncWarningf(format string, args ...interface{}) {
-	l.SyncTrigger(Errorf(Warning, format, args...))
+	l.trigger(false, Errorf(Warning, format, args...))
 }
 
 // Warning logs a warning error to std err.
 func (l *Logger) Warning(err error) error {
-	l.Trigger(NewErrorEvent(Warning, err))
+	l.trigger(true, NewErrorEvent(Warning, err))
 	return err
 }
 
 // SyncWarning synchronously logs a warning to std err.
 func (l *Logger) SyncWarning(err error) error {
-	l.SyncTrigger(NewErrorEvent(Warning, err))
+	l.trigger(false, NewErrorEvent(Warning, err))
 	return err
 }
 
 // WarningWithReq logs a warning error to std err with a request.
 func (l *Logger) WarningWithReq(err error, req *http.Request) error {
-	l.Trigger(NewErrorEventWithState(Warning, err, req))
+	l.trigger(true, NewErrorEventWithState(Warning, err, req))
 	return err
 }
 
@@ -510,24 +514,24 @@ func (l *Logger) Errorf(format string, args ...interface{}) error {
 
 // SyncErrorf synchronously triggers a error.
 func (l *Logger) SyncErrorf(format string, args ...interface{}) {
-	l.SyncTrigger(Errorf(Error, format, args...))
+	l.trigger(false, Errorf(Error, format, args...))
 }
 
 // Error logs an error to std err.
 func (l *Logger) Error(err error) error {
-	l.Trigger(NewErrorEvent(Error, err))
+	l.trigger(true, NewErrorEvent(Error, err))
 	return err
 }
 
 // SyncError synchronously logs an error to std err.
 func (l *Logger) SyncError(err error) error {
-	l.SyncTrigger(NewErrorEvent(Error, err))
+	l.trigger(false, NewErrorEvent(Error, err))
 	return err
 }
 
 // ErrorWithReq logs an error to std err with a request.
 func (l *Logger) ErrorWithReq(err error, req *http.Request) error {
-	l.Trigger(NewErrorEventWithState(Error, err, req))
+	l.trigger(true, NewErrorEventWithState(Error, err, req))
 	return err
 }
 
@@ -538,24 +542,24 @@ func (l *Logger) Fatalf(format string, args ...interface{}) error {
 
 // SyncFatalf synchronously triggers a fatal.
 func (l *Logger) SyncFatalf(format string, args ...interface{}) {
-	l.SyncTrigger(Errorf(Fatal, format, args...))
+	l.trigger(false, Errorf(Fatal, format, args...))
 }
 
 // Fatal logs the result of a panic to std err.
 func (l *Logger) Fatal(err error) error {
-	l.Trigger(NewErrorEvent(Fatal, err))
+	l.trigger(true, NewErrorEvent(Fatal, err))
 	return err
 }
 
 // SyncFatal synchronously logs a fatal to std err.
 func (l *Logger) SyncFatal(err error) error {
-	l.SyncTrigger(NewErrorEvent(Fatal, err))
+	l.trigger(false, NewErrorEvent(Fatal, err))
 	return err
 }
 
 // FatalWithReq logs the result of a fatal error to std err with a request.
 func (l *Logger) FatalWithReq(err error, req *http.Request) error {
-	l.Trigger(NewErrorEventWithState(Fatal, err, req))
+	l.trigger(true, NewErrorEventWithState(Fatal, err, req))
 	return err
 }
 
@@ -568,15 +572,17 @@ func (l *Logger) SyncFatalExit(err error) {
 
 // Write writes an event synchronously to the writer.
 func (l *Logger) Write(e Event) {
-	for _, writer := range l.writers {
-		writer.Write(e)
+	ll := len(l.writers)
+	for index := 0; index < ll; index++ {
+		l.writers[index].Write(e)
 	}
 }
 
 // WriteError writes an event synchronously to the error writer.
 func (l *Logger) WriteError(e Event) {
-	for _, writer := range l.writers {
-		writer.WriteError(e)
+	ll := len(l.writers)
+	for index := 0; index < ll; index++ {
+		l.writers[index].WriteError(e)
 	}
 }
 
@@ -620,6 +626,5 @@ func (l *Logger) Drain() error {
 			worker.Drain()
 		}
 	}
-
 	return nil
 }

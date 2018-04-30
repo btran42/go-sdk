@@ -3,7 +3,7 @@ package logger
 import "sync"
 
 var (
-	_default     *Logger
+	_default     = None()
 	_defaultLock sync.Mutex
 )
 
@@ -16,5 +16,6 @@ func Default() *Logger {
 func SetDefault(log *Logger) {
 	_defaultLock.Lock()
 	defer _defaultLock.Unlock()
+
 	_default = log
 }

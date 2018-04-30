@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +10,8 @@ import (
 )
 
 const (
-	// DefaultBufferPoolSize is the default buffer pool size.
-	DefaultBufferPoolSize = 1 << 8 // 256
+	// DefaultBufferPoolBufferSize is the default buffer pool size.
+	DefaultBufferPoolBufferSize = 1 << 10 // 1024
 
 	// DefaultTextTimeFormat is the default time format.
 	DefaultTextTimeFormat = time.RFC3339
@@ -32,7 +31,7 @@ var (
 
 // TextWritable is a type with a custom formater for text writing.
 type TextWritable interface {
-	WriteText(formatter TextFormatter, buf *bytes.Buffer)
+	WriteText(formatter TextFormatter, buf Buffer)
 }
 
 // FlagTextColorProvider is a function types can implement to provide a color.
@@ -51,7 +50,7 @@ type TextFormatter interface {
 func NewTextWriter(output io.Writer) *TextWriter {
 	return &TextWriter{
 		output:        NewInterlockedWriter(output),
-		bufferPool:    NewBufferPool(DefaultBufferPoolSize),
+		bufferPool:    NewBufferPool(DefaultBufferPoolBufferSize),
 		showHeadings:  DefaultTextWriterShowHeadings,
 		showTimestamp: DefaultTextWriterShowTimestamp,
 		useColor:      DefaultTextWriterUseColor,
@@ -74,7 +73,7 @@ func NewTextWriterFromConfig(cfg *TextWriterConfig) *TextWriter {
 	return &TextWriter{
 		output:        NewInterlockedWriter(os.Stdout),
 		errorOutput:   NewInterlockedWriter(os.Stderr),
-		bufferPool:    NewBufferPool(DefaultBufferPoolSize),
+		bufferPool:    NewBufferPool(DefaultBufferPoolBufferSize),
 		showTimestamp: cfg.GetShowTimestamp(),
 		showHeadings:  cfg.GetShowHeadings(),
 		useColor:      cfg.GetUseColor(),
@@ -228,13 +227,13 @@ func (wr *TextWriter) FormatTimestamp(optionalTime ...time.Time) string {
 }
 
 // GetBuffer returns a leased buffer from the buffer pool.
-func (wr *TextWriter) GetBuffer() *bytes.Buffer {
+func (wr *TextWriter) GetBuffer() Buffer {
 	return wr.bufferPool.Get()
 }
 
 // PutBuffer adds the leased buffer back to the pool.
 // It Should be called in conjunction with `GetBuffer`.
-func (wr *TextWriter) PutBuffer(buffer *bytes.Buffer) {
+func (wr *TextWriter) PutBuffer(buffer Buffer) {
 	wr.bufferPool.Put(buffer)
 }
 
@@ -282,19 +281,7 @@ func (wr *TextWriter) write(output io.Writer, e Event) error {
 		buf.WriteString(typed.String())
 	}
 
-	/*
-		if typed, isTyped := e.(EventLabels); isTyped {
-			if len(typed.Labels()) > 0 {
-				buf.WriteRune(RuneNewline)
-				for key, value := range typed.Labels() {
-					buf.WriteString(fmt.Sprintf("%s=%s", key, value))
-					buf.WriteRune(RuneSpace)
-				}
-			}
-		}
-	*/
-
 	buf.WriteRune(RuneNewline)
-	_, err := buf.WriteTo(output)
+	_, err := output.Write(buf.Bytes())
 	return err
 }

@@ -11,6 +11,7 @@ func TestEventFlagSetEnable(t *testing.T) {
 	assert := assert.New(t)
 
 	set := NewFlagSet().WithEnabled("FOO")
+	assert.NotNil(set.flags)
 	set.Enable("TEST")
 	assert.True(set.IsEnabled("TEST"))
 	assert.True(set.IsEnabled("FOO"))
@@ -21,6 +22,7 @@ func TestEventFlagSetDisable(t *testing.T) {
 	assert := assert.New(t)
 
 	set := NewFlagSet()
+	assert.Nil(set.flags)
 	set.Enable("TEST")
 	assert.True(set.IsEnabled("TEST"))
 	set.Disable("TEST")

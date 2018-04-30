@@ -2,40 +2,67 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/blend/go-sdk/exception"
 	"github.com/blend/go-sdk/logger"
+	"go.uber.org/zap"
 )
 
-var pool = logger.NewBufferPool(16)
+var pool = logger.NewBufferPool(1024)
 
-func logged(handler http.HandlerFunc) http.HandlerFunc {
+func logged(log *logger.Logger, handler http.HandlerFunc) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		start := time.Now()
-		logger.Default().Trigger(logger.NewWebRequestStartEvent(req))
 		rw := logger.NewResponseWriter(res)
 		handler(rw, req)
-		logger.Default().Trigger(logger.NewWebRequestEvent(req).WithStatusCode(rw.StatusCode()).WithContentLength(int64(rw.ContentLength())).WithElapsed(time.Now().Sub(start)))
+
+		log.Trigger(logger.NewWebRequestEvent(req).WithStatusCode(rw.StatusCode()).WithContentLength(int64(rw.ContentLength())).WithElapsed(time.Now().Sub(start)))
+	}
+}
+
+func zapLogged(zl *zap.Logger, handler http.HandlerFunc) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		rw := logger.NewResponseWriter(res)
+		handler(rw, req)
+
+		zl.Info("web requst",
+			zap.String("remote addr", logger.GetIP(req)),
+			zap.String("path", req.URL.Path),
+			zap.Int("status code", rw.StatusCode()),
+			zap.Int("content length", rw.ContentLength()),
+			zap.String("elapsed", fmt.Sprintf("%v", time.Since(start))),
+		)
 	}
 }
 
 func stdoutLogged(handler http.HandlerFunc) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		start := time.Now()
-		handler(res, req)
-		fmt.Printf("%s %s %s %s %s %s %s\n",
-			time.Now().UTC().Format(time.RFC3339),
-			"web.request",
-			req.Method,
-			req.URL.Path,
-			"200",
-			time.Since(start).String(),
-			"??",
-		)
+		rw := logger.NewResponseWriter(res)
+		handler(rw, req)
+
+		buf := pool.Get()
+		buf.WriteString(time.Now().UTC().Format(time.RFC3339))
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString("web.request")
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString(req.Method)
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString(req.URL.Path)
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString(strconv.Itoa(rw.StatusCode()))
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString(time.Since(start).String())
+		buf.WriteRune(logger.RuneSpace)
+		buf.WriteString(logger.FormatFileSize(int64(rw.ContentLength())))
+		buf.WriteRune(logger.RuneNewline)
+		os.Stdout.Write(buf.Bytes())
+		pool.Put(buf)
 	}
 }
 
@@ -86,20 +113,26 @@ func port() string {
 }
 
 func main() {
-	logger.SetDefault(logger.NewFromEnv().WithEnabled(logger.Info, logger.Audit))
+	log := logger.New().
+		WithFlags(logger.AllFlags()).
+		WithWriter(logger.NewTextWriter(os.Stderr).WithUseColor(false))
 
-	http.HandleFunc("/", logged(indexHandler))
+	zl, _ := zap.NewProduction()
 
-	http.HandleFunc("/sub-context", logged(subContextHandler))
-	http.HandleFunc("/fatalerror", logged(fatalErrorHandler))
-	http.HandleFunc("/error", logged(errorHandler))
-	http.HandleFunc("/warning", logged(warningHandler))
-	http.HandleFunc("/audit", logged(auditHandler))
+	http.HandleFunc("/", logged(log, indexHandler))
 
-	http.HandleFunc("/bench/logged", logged(indexHandler))
+	http.HandleFunc("/sub-context", logged(log, subContextHandler))
+	http.HandleFunc("/fatalerror", logged(log, fatalErrorHandler))
+	http.HandleFunc("/error", logged(log, errorHandler))
+	http.HandleFunc("/warning", logged(log, warningHandler))
+	http.HandleFunc("/audit", logged(log, auditHandler))
+
+	http.HandleFunc("/bench/logged", logged(log, indexHandler))
+	http.HandleFunc("/bench/zap", zapLogged(zl, indexHandler))
 	http.HandleFunc("/bench/stdout", stdoutLogged(indexHandler))
 
 	logger.Default().Infof("Listening on :%s", port())
-	logger.Default().Infof("Events %s", logger.Default().Flags().String())
-	log.Fatal(http.ListenAndServe(":"+port(), nil))
+	logger.Default().Infof("Events %s", log.Flags().String())
+
+	log.SyncFatalExit(http.ListenAndServe(":"+port(), nil))
 }

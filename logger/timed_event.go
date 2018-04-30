@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 )
@@ -98,7 +97,7 @@ func (e TimedEvent) String() string {
 }
 
 // WriteText implements TextWritable.
-func (e TimedEvent) WriteText(tf TextFormatter, buf *bytes.Buffer) {
+func (e TimedEvent) WriteText(tf TextFormatter, buf Buffer) {
 	buf.WriteString(e.String())
 }
 

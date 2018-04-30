@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -167,7 +166,7 @@ func (e AuditEvent) Extra() map[string]string {
 }
 
 // WriteText implements TextWritable.
-func (e AuditEvent) WriteText(formatter TextFormatter, buf *bytes.Buffer) {
+func (e AuditEvent) WriteText(formatter TextFormatter, buf Buffer) {
 	if len(e.principal) > 0 {
 		buf.WriteString(formatter.Colorize("Principal:", ColorGray))
 		buf.WriteString(e.principal)

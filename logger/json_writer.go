@@ -61,21 +61,17 @@ func NewJSONWriterFromEnv() *JSONWriter {
 
 // NewJSONWriterFromConfig returns a new json writer from a config.
 func NewJSONWriterFromConfig(cfg *JSONWriterConfig) *JSONWriter {
-	return &JSONWriter{
-		output:      NewInterlockedWriter(os.Stdout),
-		errorOutput: NewInterlockedWriter(os.Stderr),
-		pretty:      cfg.GetPretty(),
-	}
+	return NewJSONWriter(os.Stdout).WithErrorOutput(os.Stderr).WithPretty(cfg.GetPretty())
 }
 
 // JSONWriter is a json output format.
 type JSONWriter struct {
-	output             io.Writer
-	errorOutput        io.Writer
-	outputEncoder      *json.Encoder
-	errorOutputEncoder *json.Encoder
-	pretty             bool
-	includeTimestamp   bool
+	output           io.Writer
+	errorOutput      io.Writer
+	encoder          *json.Encoder
+	errorEncoder     *json.Encoder
+	pretty           bool
+	includeTimestamp bool
 }
 
 // OutputFormat returns the output format.
@@ -86,12 +82,20 @@ func (jw *JSONWriter) OutputFormat() OutputFormat {
 // WithOutput sets the primary output.
 func (jw *JSONWriter) WithOutput(output io.Writer) *JSONWriter {
 	jw.output = NewInterlockedWriter(output)
+	jw.encoder = json.NewEncoder(jw.output)
+	if jw.pretty {
+		jw.encoder.SetIndent("", "\t")
+	}
 	return jw
 }
 
 // WithErrorOutput sets the error output.
 func (jw *JSONWriter) WithErrorOutput(errorOutput io.Writer) *JSONWriter {
 	jw.errorOutput = NewInterlockedWriter(errorOutput)
+	jw.errorEncoder = json.NewEncoder(jw.output)
+	if jw.pretty {
+		jw.errorEncoder.SetIndent("", "\t")
+	}
 	return jw
 }
 
@@ -100,12 +104,20 @@ func (jw *JSONWriter) Output() io.Writer {
 	return jw.output
 }
 
-// ErrorOutput returns an io.Writer for the error stream.
+// ErrorOutput returns an io.Writer for the ouptut stream.
 func (jw *JSONWriter) ErrorOutput() io.Writer {
 	if jw.errorOutput != nil {
 		return jw.errorOutput
 	}
 	return jw.output
+}
+
+// ErrorEncoder returns an io.Writer for the error stream.
+func (jw *JSONWriter) ErrorEncoder() *json.Encoder {
+	if jw.errorEncoder != nil {
+		return jw.errorEncoder
+	}
+	return jw.encoder
 }
 
 // Pretty returns if we should ident output.
@@ -132,20 +144,15 @@ func (jw *JSONWriter) WithIncludeTimestamp(includeTimestamp bool) *JSONWriter {
 
 // Write writes to stdout.
 func (jw *JSONWriter) Write(e Event) error {
-	return jw.write(jw.output, e)
+	return jw.write(jw.encoder, e)
 }
 
 // WriteError writes to stderr (or stdout if .errorOutput is unset).
 func (jw *JSONWriter) WriteError(e Event) error {
-	return jw.write(jw.ErrorOutput(), e)
+	return jw.write(jw.ErrorEncoder(), e)
 }
 
-func (jw *JSONWriter) write(output io.Writer, e Event) error {
-	encoder := json.NewEncoder(output)
-	if jw.pretty {
-		encoder.SetIndent("", "\t")
-	}
-
+func (jw *JSONWriter) write(encoder *json.Encoder, e Event) error {
 	if typed, isTyped := e.(JSONWritable); isTyped {
 		fields := typed.WriteJSON()
 		if typed, isTyped := e.(EventHeadings); isTyped && len(typed.Headings()) > 0 {
@@ -155,8 +162,8 @@ func (jw *JSONWriter) write(output io.Writer, e Event) error {
 		if jw.includeTimestamp {
 			fields[JSONFieldTimestamp] = e.Timestamp()
 		}
-		return encoder.Encode(fields)
+		return jw.encoder.Encode(fields)
 	}
 
-	return encoder.Encode(e)
+	return jw.encoder.Encode(e)
 }

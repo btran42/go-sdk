@@ -1,33 +1,31 @@
 package logger
 
 import (
-	"bytes"
 	"sync"
 )
 
 // NewBufferPool returns a new BufferPool.
 func NewBufferPool(bufferSize int) *BufferPool {
 	return &BufferPool{
-		Pool: sync.Pool{New: func() Any {
-			b := bytes.NewBuffer(make([]byte, bufferSize))
-			b.Reset()
-			return b
+		Pool: &sync.Pool{New: func() Any {
+			return &ArrayBuffer{bs: make([]byte, 0, bufferSize)}
 		}},
 	}
 }
 
-// BufferPool is a sync.Pool of bytes.Buffer.
+// BufferPool is a sync.Pool of Buffer.
 type BufferPool struct {
-	sync.Pool
+	*sync.Pool
 }
 
-// Get returns a pooled bytes.Buffer instance.
-func (bp *BufferPool) Get() *bytes.Buffer {
-	return bp.Pool.Get().(*bytes.Buffer)
+// Get returns a pooled Buffer instance.
+func (bp *BufferPool) Get() Buffer {
+	b := bp.Pool.Get().(Buffer)
+	b.Reset()
+	return b
 }
 
 // Put returns the pooled instance.
-func (bp *BufferPool) Put(b *bytes.Buffer) {
-	b.Reset()
+func (bp *BufferPool) Put(b Buffer) {
 	bp.Pool.Put(b)
 }

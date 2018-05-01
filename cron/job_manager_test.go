@@ -13,6 +13,7 @@ import (
 
 	"github.com/blend/go-sdk/assert"
 	logger "github.com/blend/go-sdk/logger"
+	"github.com/blend/go-sdk/worker"
 )
 
 const (
@@ -92,7 +93,8 @@ func TestRunTask(t *testing.T) {
 	a.StartTimeout(2000 * time.Millisecond)
 	defer a.EndTimeout()
 
-	jm := New().WithHighPrecisionHeartbeat()
+	ts := worker.NewMockTimeSource()
+	jm := New().WithHighPrecisionHeartbeat().WithTimeSource(ts)
 
 	didRun := new(AtomicFlag)
 	var runCount int32
@@ -109,18 +111,7 @@ func TestRunTask(t *testing.T) {
 		}
 
 		func() {
-			jm.runningTasksLock.Lock()
-			defer jm.runningTasksLock.Unlock()
-
-			jm.runningTaskStartTimesLock.Lock()
-			defer jm.runningTaskStartTimesLock.Unlock()
-
-			jm.cancelsLock.Lock()
-			defer jm.cancelsLock.Unlock()
-
-			a.Len(jm.runningTasks, 1)
-			a.Len(jm.runningTaskStartTimes, 1)
-			a.Len(jm.cancels, 1)
+			a.Len(jm.tasks, 1)
 		}()
 
 		elapsed = elapsed + 10*time.Millisecond
@@ -225,7 +216,7 @@ func TestDisableJob(t *testing.T) {
 
 	err = jm.DisableJob(runAtJobName)
 	a.Nil(err)
-	a.True(jm.disabledJobs.Contains(runAtJobName))
+	a.True(jm.jobMetas.Contains(runAtJobName))
 }
 
 func TestSerialTask(t *testing.T) {

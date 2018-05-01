@@ -15,7 +15,7 @@ func TestEventStartedListener(t *testing.T) {
 	assert := assert.New(t)
 
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(4)
 
 	textBuffer := bytes.NewBuffer(nil)
 	jsonBuffer := bytes.NewBuffer(nil)
@@ -26,6 +26,9 @@ func TestEventStartedListener(t *testing.T) {
 		WithWriter(logger.NewJSONWriter(jsonBuffer))
 
 	defer all.Close()
+
+	assert.True(all.IsEnabled(FlagStarted))
+	assert.False(all.IsHidden(FlagStarted))
 
 	all.Listen(FlagStarted, "default", NewEventListener(func(e *Event) {
 		defer wg.Done()
@@ -39,11 +42,17 @@ func TestEventStartedListener(t *testing.T) {
 		assert.Zero(e.Elapsed())
 	}))
 
-	go func() { all.Trigger(NewEvent(FlagStarted, "test_task")) }()
-	go func() { all.Trigger(NewEvent(FlagStarted, "test_task")) }()
+	go func() {
+		defer wg.Done()
+		all.Trigger(NewEvent(FlagStarted, "test_task"))
+	}()
+	go func() {
+		defer wg.Done()
+		all.Trigger(NewEvent(FlagStarted, "test_task"))
+	}()
 
-	wg.Wait()
 	all.Drain()
+	wg.Wait()
 
 	assert.NotEmpty(textBuffer.String())
 	assert.NotEmpty(jsonBuffer.String())

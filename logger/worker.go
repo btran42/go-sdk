@@ -12,28 +12,20 @@ const (
 // NewWorker returns a new worker.
 func NewWorker(parent *Logger, listener Listener) *Worker {
 	return &Worker{
-		Parent:        parent,
-		Listener:      listener,
-		Work:          make(chan Event, DefaultWorkerQueueDepth),
-		RecoverPanics: true,
+		Parent:   parent,
+		Listener: listener,
+		Work:     make(chan Event, DefaultWorkerQueueDepth),
 	}
 }
 
 // Worker is an agent that processes a listener.
 type Worker struct {
-	Parent        *Logger
-	Listener      Listener
-	Abort         chan struct{}
-	Aborted       chan struct{}
-	Work          chan Event
-	SyncRoot      sync.Mutex
-	RecoverPanics bool
-}
-
-// WithRecoverPanics sets the recover panics field.
-func (w *Worker) WithRecoverPanics(value bool) *Worker {
-	w.RecoverPanics = value
-	return w
+	Parent   *Logger
+	Listener Listener
+	Abort    chan struct{}
+	Aborted  chan struct{}
+	Work     chan Event
+	SyncRoot sync.Mutex
 }
 
 // Start starts the worker.
@@ -59,7 +51,7 @@ func (w *Worker) ProcessLoop() {
 
 // Process calls the listener for an event.
 func (w *Worker) Process(e Event) {
-	if w.RecoverPanics {
+	if w.Parent.RecoversPanics() {
 		defer func() {
 			if r := recover(); r != nil {
 				if w.Parent != nil {

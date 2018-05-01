@@ -69,3 +69,12 @@ func (sm *SyncTaskMetaMap) Each(action func(string, *TaskMeta)) {
 		action(key, task)
 	}
 }
+
+// Do runs an action for a given name safely.
+func (sm *SyncTaskMetaMap) Do(name string, action func(*TaskMeta)) {
+	sm.Lock()
+	if taskMeta, has := sm.tasks[name]; has {
+		action(taskMeta)
+	}
+	sm.Unlock()
+}

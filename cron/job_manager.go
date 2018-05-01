@@ -69,6 +69,8 @@ func (jm *JobManager) SetLogger(log *logger.Logger) {
 // WithTimeSource sets the time source.
 func (jm *JobManager) WithTimeSource(ts worker.TimeSource) *JobManager {
 	jm.timeSource = ts
+	jm.killHangingTasksWorker.WithTimeSource(ts)
+	jm.schedulerWorker.WithTimeSource(ts)
 	return jm
 }
 
@@ -221,7 +223,6 @@ func (jm *JobManager) LoadJob(j Job) error {
 
 	jm.setJob(j)
 	jm.setNextRunTime(jobName, j.Schedule().GetNextRunTime(nil))
-	jm.setEnabledProvider(jobName, j)
 	return nil
 }
 
@@ -322,6 +323,7 @@ func (jm *JobManager) RunTask(t Task) error {
 	if !jm.shouldRunTask(t) {
 		return nil
 	}
+
 	taskName := t.Name()
 	start := Now()
 	ctx, cancel := jm.createContext()
@@ -450,8 +452,9 @@ func (jm *JobManager) killHangingTasks() (err error) {
 			return
 		}
 		currentTime := jm.timeSource.Now()
-		if jobMeta, hasJobMeta := jm.jobMetas.Get(taskName); hasJobMeta {
-			nextRuntime := jobMeta.NextRunTime
+		if hasJobMeta := jm.jobMetas.Contains(taskName); hasJobMeta {
+			nextRuntime := jm.getNextRunTime(taskName)
+
 			// we need to calculate the effective timeout
 			// either startedTime+timeout or the next runtime, whichever is closer.
 
@@ -470,7 +473,7 @@ func (jm *JobManager) killHangingTasks() (err error) {
 					jm.log.Error(err)
 				}
 			}
-		} else if currentTime.Sub(taskMeta.StartTime) >= taskMeta.TimeoutProvider() {
+		} else if taskMeta.Timeout.Before(currentTime) {
 			err = jm.killHangingJob(taskName)
 			if err != nil {
 				jm.log.Error(err)
@@ -496,7 +499,9 @@ func (jm *JobManager) killHangingJob(taskName string) error {
 	if !hasMeta {
 		return nil
 	}
+
 	meta.Cancel()
+	jm.onTaskCancellation(meta.Task)
 	jm.tasks.Delete(taskName)
 
 	return nil
@@ -527,9 +532,9 @@ func (jm *JobManager) getContext(taskName string) (ctx context.Context) {
 
 // note; this setter is out of order because of the linter.
 func (jm *JobManager) setContext(ctx context.Context, taskName string) {
-	if t, has := jm.tasks.Get(taskName); has {
+	jm.tasks.Do(taskName, func(t *TaskMeta) {
 		t.Context = ctx
-	}
+	})
 }
 
 func (jm *JobManager) getCancelFunc(taskName string) (cancel context.CancelFunc) {
@@ -540,21 +545,21 @@ func (jm *JobManager) getCancelFunc(taskName string) (cancel context.CancelFunc)
 }
 
 func (jm *JobManager) setCancelFunc(taskName string, cancel context.CancelFunc) {
-	if t, has := jm.tasks.Get(taskName); has {
+	jm.tasks.Do(taskName, func(t *TaskMeta) {
 		t.Cancel = cancel
-	}
+	})
 }
 
 func (jm *JobManager) setJobDisabled(jobName string) {
-	if j, has := jm.jobMetas.Get(jobName); has {
+	jm.jobMetas.Do(jobName, func(j *JobMeta) {
 		j.Disabled = true
-	}
+	})
 }
 
 func (jm *JobManager) setJobEnabled(jobName string) {
-	if j, has := jm.jobMetas.Get(jobName); has {
+	jm.jobMetas.Do(jobName, func(j *JobMeta) {
 		j.Disabled = false
-	}
+	})
 }
 
 func (jm *JobManager) getNextRunTime(jobName string) (nextRunTime *time.Time) {
@@ -565,17 +570,9 @@ func (jm *JobManager) getNextRunTime(jobName string) (nextRunTime *time.Time) {
 }
 
 func (jm *JobManager) setNextRunTime(jobName string, t *time.Time) {
-	if j, has := jm.jobMetas.Get(jobName); has {
+	jm.jobMetas.Do(jobName, func(j *JobMeta) {
 		j.NextRunTime = t
-	}
-}
-
-func (jm *JobManager) setEnabledProvider(jobName string, j Job) {
-	if typed, isTyped := j.(EnabledProvider); isTyped {
-		if j, has := jm.jobMetas.Get(jobName); has {
-			j.EnabledProvider = typed.Enabled
-		}
-	}
+	})
 }
 
 func (jm *JobManager) getLastRunTime(jobName string) (lastRunTime *time.Time) {
@@ -586,9 +583,9 @@ func (jm *JobManager) getLastRunTime(jobName string) (lastRunTime *time.Time) {
 }
 
 func (jm *JobManager) setLastRunTime(jobName string, t time.Time) {
-	if j, has := jm.jobMetas.Get(jobName); has {
+	jm.jobMetas.Do(jobName, func(j *JobMeta) {
 		j.LastRunTime = &t
-	}
+	})
 }
 
 func (jm *JobManager) getJob(jobName string) (job Job) {
@@ -598,7 +595,11 @@ func (jm *JobManager) getJob(jobName string) (job Job) {
 
 func (jm *JobManager) setJob(j Job) {
 	jm.jobs.Set(j)
-	jm.jobMetas.Set(&JobMeta{Name: j.Name()})
+	meta := &JobMeta{Name: j.Name()}
+	if typed, isTyped := j.(EnabledProvider); isTyped {
+		meta.EnabledProvider = typed.Enabled
+	}
+	jm.jobMetas.Set(meta)
 }
 
 func (jm *JobManager) getRunningTask(taskName string) (task Task) {
@@ -609,7 +610,11 @@ func (jm *JobManager) getRunningTask(taskName string) (task Task) {
 }
 
 func (jm *JobManager) setRunningTask(t Task) {
-	jm.tasks.Set(&TaskMeta{StartTime: jm.timeSource.Now(), Name: t.Name(), Task: t})
+	tm := &TaskMeta{StartTime: jm.timeSource.Now(), Name: t.Name(), Task: t}
+	if typed, isTyped := t.(TimeoutProvider); isTyped {
+		tm.Timeout = tm.StartTime.Add(typed.Timeout())
+	}
+	jm.tasks.Set(tm)
 }
 
 func (jm *JobManager) getRunningTaskStartTime(taskName string) (startTime time.Time) {

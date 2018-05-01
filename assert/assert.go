@@ -58,9 +58,7 @@ func Empty() *Assertions {
 // New returns a new instance of `Assertions`.
 func New(t *testing.T) *Assertions {
 	return &Assertions{
-		t:            t,
-		timerAbort:   make(chan bool),
-		timerAborted: make(chan bool),
+		t: t,
 	}
 }
 
@@ -68,10 +66,8 @@ func New(t *testing.T) *Assertions {
 func Filtered(t *testing.T, filter Filter) *Assertions {
 	CheckFilter(t, filter)
 	return &Assertions{
-		filter:       filter,
-		t:            t,
-		timerAbort:   make(chan bool),
-		timerAborted: make(chan bool),
+		filter: filter,
+		t:      t,
 	}
 }
 
@@ -80,8 +76,8 @@ type Assertions struct {
 	output       io.Writer
 	filter       Filter
 	t            *testing.T
-	timerAbort   chan bool
-	timerAborted chan bool
+	timerAbort   chan struct{}
+	timerAborted chan struct{}
 }
 
 // WithFilter sets the filter.
@@ -368,14 +364,15 @@ func (a *Assertions) FailNow(userMessageComponents ...interface{}) {
 
 // StartTimeout starts a timed block.
 func (a *Assertions) StartTimeout(timeout time.Duration, userMessageComponents ...interface{}) {
-	ticker := time.NewTimer(timeout)
+	timer := time.NewTimer(timeout)
+	a.timerAbort = make(chan struct{})
+	a.timerAborted = make(chan struct{})
 	go func() {
 		select {
-		case <-ticker.C:
-			a.t.Errorf("Timeout Reached")
-			a.t.FailNow()
+		case <-timer.C:
+			panic("Timeout Reached")
 		case <-a.timerAbort:
-			a.timerAborted <- true
+			close(a.timerAborted)
 			return
 		}
 	}()
@@ -383,7 +380,7 @@ func (a *Assertions) StartTimeout(timeout time.Duration, userMessageComponents .
 
 // EndTimeout marks a timed block as complete.
 func (a *Assertions) EndTimeout() {
-	a.timerAbort <- true
+	close(a.timerAbort)
 	<-a.timerAborted
 }
 

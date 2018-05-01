@@ -7,11 +7,10 @@ import (
 
 // TaskMeta is metadata for a running task.
 type TaskMeta struct {
-	Name            string               `json:"name"`
-	Task            Task                 `json:"-"`
-	TimeoutProvider func() time.Duration `json:"-"`
-	StartTime       time.Time            `json:"startTime"`
-	Timeout         time.Time            `json:"timeout"`
-	Context         context.Context      `json:"-"`
-	Cancel          context.CancelFunc   `json:"-"`
+	Name      string             `json:"name"`
+	Task      Task               `json:"-"`
+	StartTime time.Time          `json:"startTime"`
+	Timeout   time.Time          `json:"timeout"`
+	Context   context.Context    `json:"-"`
+	Cancel    context.CancelFunc `json:"-"`
 }

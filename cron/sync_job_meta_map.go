@@ -69,3 +69,12 @@ func (jm *SyncJobMetaMap) Each(action func(string, *JobMeta)) {
 		action(key, job)
 	}
 }
+
+// Do runs an action for a given name safely.
+func (jm *SyncJobMetaMap) Do(name string, action func(*JobMeta)) {
+	jm.Lock()
+	if jobMeta, has := jm.jobs[name]; has {
+		action(jobMeta)
+	}
+	jm.Unlock()
+}

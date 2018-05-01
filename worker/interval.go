@@ -88,7 +88,7 @@ func (i *Interval) Start() {
 		i.latch.Started()
 
 		if i.delay > 0 {
-			time.Sleep(i.delay)
+			i.timeSource.Sleep(i.delay)
 		}
 
 		tick := i.timeSource.Tick(i.interval)

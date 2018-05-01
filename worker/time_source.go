@@ -55,7 +55,7 @@ func (mts *MockTimeSource) Sleep(d time.Duration) {
 
 // Tick implements a mock ticker.
 func (mts *MockTimeSource) Tick(d time.Duration) <-chan time.Time {
-	ticker := &mockTicker{Current: mts.Current, Tick: make(chan time.Time)}
+	ticker := &mockTicker{Current: mts.Current, Interval: d, Tick: make(chan time.Time)}
 	mts.Tickers = append(mts.Tickers, ticker)
 	return ticker.Tick
 }

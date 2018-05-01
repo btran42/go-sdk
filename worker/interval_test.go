@@ -28,3 +28,22 @@ func TestIntervalWorker(t *testing.T) {
 
 	assert.True(didWork)
 }
+
+func TestIntervalWorkerWithMockedTimeSource(t *testing.T) {
+	assert := assert.New(t)
+	assert.StartTimeout(time.Millisecond)
+	defer assert.EndTimeout()
+
+	mts := NewMockTimeSource()
+
+	var count int
+	iw := NewInterval(func() error {
+		count = count + 1
+		return nil
+	}, time.Millisecond).WithTimeSource(mts)
+
+	iw.Start()
+	mts.Sleep(50 * time.Millisecond)
+	iw.Stop()
+	assert.Equal(50, count)
+}

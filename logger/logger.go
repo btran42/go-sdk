@@ -222,11 +222,16 @@ func (l *Logger) Disable(flags ...Flag) {
 }
 
 // IsEnabled asserts if a flag value is set or not.
-func (l *Logger) IsEnabled(flag Flag) bool {
+func (l *Logger) IsEnabled(flag Flag) (enabled bool) {
+	l.flagsLock.Lock()
 	if l.flags == nil {
-		return false
+		enabled = false
+		l.flagsLock.Unlock()
+		return
 	}
-	return l.flags.IsEnabled(flag)
+	enabled = l.flags.IsEnabled(flag)
+	l.flagsLock.Unlock()
+	return
 }
 
 // Hide disallows automatic logging for each event emitted under the provided list of flags.

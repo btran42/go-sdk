@@ -98,7 +98,7 @@ func TestImmediatelyThen(t *testing.T) {
 	s := Immediately().Then(EveryHour())
 	assert.NotNil(s.GetNextRunTime(nil))
 	now := Now()
-	next := *s.GetNextRunTime(optional(Now()))
+	next := Deref(s.GetNextRunTime(Optional(Now())))
 	assert.True(next.Sub(now) > time.Minute, fmt.Sprintf("%v", next.Sub(now)))
 	assert.True(next.Sub(now) < (2 * time.Hour))
 }

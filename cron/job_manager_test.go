@@ -60,6 +60,9 @@ func (tj *testJobWithTimeout) Timeout() time.Duration {
 }
 
 func (tj *testJobWithTimeout) Schedule() Schedule {
+	if !tj.RunAt.IsZero() {
+		return At(tj.RunAt)
+	}
 	return Immediately()
 }
 
@@ -128,7 +131,7 @@ func TestRunTaskAndCancel(t *testing.T) {
 				return nil
 			default:
 				taskElapsed = taskElapsed + 10*time.Millisecond
-				time.Sleep(10 * time.Millisecond)
+				jm.TimeSource().Sleep(10 * time.Millisecond)
 			}
 		}
 
@@ -202,7 +205,7 @@ func TestDisableJob(t *testing.T) {
 
 	err = jm.DisableJob(runAtJobName)
 	a.Nil(err)
-	a.True(jm.jobMetas.Contains(runAtJobName))
+	a.NotEmpty(jm.jobMetas)
 }
 
 func TestSerialTask(t *testing.T) {
@@ -240,9 +243,9 @@ func TestSerialTask(t *testing.T) {
 func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 	a := assert.New(t)
 
-	jm := New()
+	jm := New().WithLogger(logger.All())
+	defer jm.Logger().Close()
 
-	start := Now()
 	canceled := new(AtomicFlag)
 	didCancel := new(AtomicFlag)
 	cancelCount := new(AtomicCounter)
@@ -251,7 +254,6 @@ func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 	wg.Add(1)
 
 	jm.LoadJob(&testJobWithTimeout{
-		RunAt:           start,
 		TimeoutDuration: 250 * time.Millisecond,
 		RunDelegate: func(ctx context.Context) error {
 			defer wg.Done()
@@ -261,7 +263,7 @@ func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 					canceled.Set(true)
 					return nil
 				default:
-					time.Sleep(10 * time.Millisecond)
+					jm.TimeSource().Sleep(10 * time.Millisecond)
 					continue
 				}
 			}
@@ -319,8 +321,8 @@ func TestJobManagerStartedListener(t *testing.T) {
 	wg.Add(2)
 
 	output := bytes.NewBuffer(nil)
-	agent := logger.New(FlagStarted, logger.Error).WithWriter(
-		logger.NewTextWriter(output).
+	agent := logger.New(FlagStarted, logger.Error).WithRecoverPanics(false).
+		WithWriter(logger.NewTextWriter(output).
 			WithUseColor(false).
 			WithShowTimestamp(false))
 

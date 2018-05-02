@@ -162,12 +162,12 @@ func (i *ImmediateSchedule) Then(then Schedule) Schedule {
 func (i *ImmediateSchedule) GetNextRunTime(after *time.Time) *time.Time {
 	if !i.didRun {
 		i.didRun = true
-		return optional(Now())
+		return Optional(Now())
 	}
 	if i.then != nil {
 		return i.then.GetNextRunTime(after)
 	}
-	return optional(Now())
+	return nil
 }
 
 // IntervalSchedule is as chedule that fires every given interval with an optional start delay.
@@ -206,7 +206,7 @@ func (ds DailySchedule) checkDayOfWeekMask(day time.Weekday) bool {
 // GetNextRunTime implements Schedule.
 func (ds DailySchedule) GetNextRunTime(after *time.Time) *time.Time {
 	if after == nil {
-		after = optional(Now())
+		after = Optional(Now())
 	}
 
 	todayInstance := time.Date(after.Year(), after.Month(), after.Day(), ds.TimeOfDayUTC.Hour(), ds.TimeOfDayUTC.Minute(), ds.TimeOfDayUTC.Second(), 0, time.UTC)
@@ -293,13 +293,23 @@ func (o OnTheHourAt) GetNextRunTime(after *time.Time) *time.Time {
 	return &returnValue
 }
 
-// --------------------------------------------------------------------------------
-// Helpers
-// --------------------------------------------------------------------------------
+// At returns a schedule.
+func At(t time.Time) Schedule {
+	return OnceAtSchedule{Time: t}
+}
 
-func optional(t time.Time) *time.Time {
-	if t.IsZero() {
-		return nil
+// OnceAtSchedule is a schedule.
+type OnceAtSchedule struct {
+	Time time.Time
+}
+
+// GetNextRunTime returns the next runtime.
+func (oa OnceAtSchedule) GetNextRunTime(after *time.Time) *time.Time {
+	if after == nil {
+		return &oa.Time
 	}
-	return &t
+	if oa.Time.After(*after) {
+		return &oa.Time
+	}
+	return nil
 }

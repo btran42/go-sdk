@@ -2,18 +2,43 @@ package cron
 
 import "time"
 
-// Now returns a new timestamp.
+// Now returns the current time in utc.
 func Now() time.Time {
 	return time.Now().UTC()
 }
 
-// Since returns the duration since another timestamp.
+// Deref derefs a time safely.
+func Deref(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
+// Optional returns an optional time.
+func Optional(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// Since returns the time delta since a given time.
 func Since(t time.Time) time.Duration {
-	return Now().Sub(t)
+	return time.Now().UTC().Sub(t)
 }
 
 // Min returns the minimum of two times.
 func Min(t1, t2 time.Time) time.Time {
+	if t1.IsZero() && t2.IsZero() {
+		return time.Time{}
+	}
+	if t1.IsZero() {
+		return t2
+	}
+	if t2.IsZero() {
+		return t1
+	}
 	if t1.Before(t2) {
 		return t1
 	}

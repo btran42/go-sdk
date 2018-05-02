@@ -33,6 +33,12 @@ func (i *Interval) Delay() time.Duration {
 	return i.delay
 }
 
+// WithInterval sets the inteval. It must be set before `.Start()` is called.
+func (i *Interval) WithInterval(d time.Duration) *Interval {
+	i.interval = d
+	return i
+}
+
 // Interval returns the interval for the ticker.
 func (i Interval) Interval() time.Duration {
 	return i.interval

@@ -1,65 +1,20 @@
 package cron
 
-import "time"
-
-// NOTE: time.Zero()? what's that?
-var (
-	// DaysOfWeek are all the time.Weekday in an array for utility purposes.
-	DaysOfWeek = []time.Weekday{
-		time.Sunday,
-		time.Monday,
-		time.Tuesday,
-		time.Wednesday,
-		time.Thursday,
-		time.Friday,
-		time.Saturday,
-	}
-
-	// WeekDays are the business time.Weekday in an array.
-	WeekDays = []time.Weekday{
-		time.Monday,
-		time.Tuesday,
-		time.Wednesday,
-		time.Thursday,
-		time.Friday,
-	}
-
-	// WeekWeekEndDaysDays are the weekend time.Weekday in an array.
-	WeekendDays = []time.Weekday{
-		time.Sunday,
-		time.Saturday,
-	}
-
-	// Epoch is unix epoch saved for utility purposes.
-	Epoch = time.Unix(0, 0)
+import (
+	"sync"
+	"time"
 )
 
-// NOTE: we have to use shifts here because in their infinite wisdom google didn't make these values powers of two for masking
-
-const (
-	// AllDaysMask is a bitmask of all the days of the week.
-	AllDaysMask = 1<<uint(time.Sunday) | 1<<uint(time.Monday) | 1<<uint(time.Tuesday) | 1<<uint(time.Wednesday) | 1<<uint(time.Thursday) | 1<<uint(time.Friday) | 1<<uint(time.Saturday)
-	// WeekDaysMask is a bitmask of all the weekdays of the week.
-	WeekDaysMask = 1<<uint(time.Monday) | 1<<uint(time.Tuesday) | 1<<uint(time.Wednesday) | 1<<uint(time.Thursday) | 1<<uint(time.Friday)
-	//WeekendDaysMask is a bitmask of the weekend days of the week.
-	WeekendDaysMask = 1<<uint(time.Sunday) | 1<<uint(time.Saturday)
-)
-
-// IsWeekDay returns if the day is a monday->friday.
-func IsWeekDay(day time.Weekday) bool {
-	return !IsWeekendDay(day)
-}
-
-// IsWeekendDay returns if the day is a monday->friday.
-func IsWeekendDay(day time.Weekday) bool {
-	return day == time.Saturday || day == time.Sunday
+// NowSource is a type that provides a `Now()` value.
+type NowSource interface {
+	Now() time.Time
 }
 
 // Schedule is a type that provides a next runtime after a given previous runtime.
 type Schedule interface {
 	// GetNextRuntime should return the next runtime after a given previous runtime. If `after` is <nil> it should be assumed
 	// the job hasn't run yet. If <nil> is returned by the schedule it is inferred that the job should not run again.
-	GetNextRunTime(after *time.Time) *time.Time
+	GetNextRunTime(NowSource, *time.Time) *time.Time
 }
 
 // EverySecond returns a schedule that fires every second.
@@ -136,7 +91,7 @@ func OnDemand() Schedule {
 type OnDemandSchedule struct{}
 
 // GetNextRunTime gets the next run time.
-func (ods OnDemandSchedule) GetNextRunTime(after *time.Time) *time.Time {
+func (ods OnDemandSchedule) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	return nil
 }
 
@@ -148,6 +103,8 @@ func Immediately() *ImmediateSchedule {
 
 // ImmediateSchedule fires immediately with an optional subsequent schedule..
 type ImmediateSchedule struct {
+	sync.Mutex
+
 	didRun bool
 	then   Schedule
 }
@@ -159,13 +116,16 @@ func (i *ImmediateSchedule) Then(then Schedule) Schedule {
 }
 
 // GetNextRunTime implements Schedule.
-func (i *ImmediateSchedule) GetNextRunTime(after *time.Time) *time.Time {
+func (i *ImmediateSchedule) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
+	i.Lock()
+	defer i.Unlock()
+
 	if !i.didRun {
 		i.didRun = true
-		return Optional(Now())
+		return Optional(ns.Now())
 	}
 	if i.then != nil {
-		return i.then.GetNextRunTime(after)
+		return i.then.GetNextRunTime(ns, after)
 	}
 	return nil
 }
@@ -177,13 +137,13 @@ type IntervalSchedule struct {
 }
 
 // GetNextRunTime implements Schedule.
-func (i IntervalSchedule) GetNextRunTime(after *time.Time) *time.Time {
+func (i IntervalSchedule) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	if after == nil {
 		if i.StartDelay == nil {
-			next := Now().Add(i.Every)
+			next := ns.Now().Add(i.Every)
 			return &next
 		}
-		next := Now().Add(*i.StartDelay).Add(i.Every)
+		next := ns.Now().Add(*i.StartDelay).Add(i.Every)
 		return &next
 	}
 	last := *after
@@ -204,9 +164,9 @@ func (ds DailySchedule) checkDayOfWeekMask(day time.Weekday) bool {
 }
 
 // GetNextRunTime implements Schedule.
-func (ds DailySchedule) GetNextRunTime(after *time.Time) *time.Time {
+func (ds DailySchedule) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	if after == nil {
-		after = Optional(Now())
+		after = Optional(ns.Now())
 	}
 
 	todayInstance := time.Date(after.Year(), after.Month(), after.Day(), ds.TimeOfDayUTC.Hour(), ds.TimeOfDayUTC.Minute(), ds.TimeOfDayUTC.Second(), 0, time.UTC)
@@ -225,10 +185,10 @@ func (ds DailySchedule) GetNextRunTime(after *time.Time) *time.Time {
 type OnTheQuarterHour struct{}
 
 // GetNextRunTime implements the chronometer Schedule api.
-func (o OnTheQuarterHour) GetNextRunTime(after *time.Time) *time.Time {
+func (o OnTheQuarterHour) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	var returnValue time.Time
 	if after == nil {
-		now := Now()
+		now := ns.Now()
 		if now.Minute() >= 45 {
 			returnValue = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 45, 0, 0, time.UTC).Add(15 * time.Minute)
 		} else if now.Minute() >= 30 {
@@ -256,9 +216,9 @@ func (o OnTheQuarterHour) GetNextRunTime(after *time.Time) *time.Time {
 type OnTheHour struct{}
 
 // GetNextRunTime implements the chronometer Schedule api.
-func (o OnTheHour) GetNextRunTime(after *time.Time) *time.Time {
+func (o OnTheHour) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	var returnValue time.Time
-	now := Now()
+	now := ns.Now()
 	if after == nil {
 		returnValue = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC).Add(1 * time.Hour)
 		if returnValue.Before(now) {
@@ -276,9 +236,9 @@ type OnTheHourAt struct {
 }
 
 // GetNextRunTime implements the chronometer Schedule api.
-func (o OnTheHourAt) GetNextRunTime(after *time.Time) *time.Time {
+func (o OnTheHourAt) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	var returnValue time.Time
-	now := Now()
+	now := ns.Now()
 	if after == nil {
 		returnValue = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), o.Minute, 0, 0, time.UTC)
 		if returnValue.Before(now) {
@@ -304,7 +264,7 @@ type OnceAtSchedule struct {
 }
 
 // GetNextRunTime returns the next runtime.
-func (oa OnceAtSchedule) GetNextRunTime(after *time.Time) *time.Time {
+func (oa OnceAtSchedule) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
 	if after == nil {
 		return &oa.Time
 	}

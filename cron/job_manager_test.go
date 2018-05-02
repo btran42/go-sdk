@@ -12,95 +12,17 @@ import (
 	"strings"
 
 	"github.com/blend/go-sdk/assert"
-	logger "github.com/blend/go-sdk/logger"
+	"github.com/blend/go-sdk/logger"
 	"github.com/blend/go-sdk/worker"
 )
-
-const (
-	runAtJobName = "runAt"
-)
-
-type runAtJob struct {
-	RunAt       time.Time
-	RunDelegate func(ctx context.Context) error
-}
-
-type runAt time.Time
-
-func (ra runAt) GetNextRunTime(after *time.Time) *time.Time {
-	typed := time.Time(ra)
-	return &typed
-}
-
-func (raj *runAtJob) Name() string {
-	return "runAt"
-}
-
-func (raj *runAtJob) Schedule() Schedule {
-	return runAt(raj.RunAt)
-}
-
-func (raj *runAtJob) Execute(ctx context.Context) error {
-	return raj.RunDelegate(ctx)
-}
-
-type testJobWithTimeout struct {
-	RunAt                time.Time
-	TimeoutDuration      time.Duration
-	RunDelegate          func(ctx context.Context) error
-	CancellationDelegate func()
-}
-
-func (tj *testJobWithTimeout) Name() string {
-	return "testJobWithTimeout"
-}
-
-func (tj *testJobWithTimeout) Timeout() time.Duration {
-	return tj.TimeoutDuration
-}
-
-func (tj *testJobWithTimeout) Schedule() Schedule {
-	if !tj.RunAt.IsZero() {
-		return At(tj.RunAt)
-	}
-	return Immediately()
-}
-
-func (tj *testJobWithTimeout) Execute(ctx context.Context) error {
-	return tj.RunDelegate(ctx)
-}
-
-func (tj *testJobWithTimeout) OnCancellation() {
-	tj.CancellationDelegate()
-}
-
-type testJobInterval struct {
-	RunEvery    time.Duration
-	RunDelegate func(ctx context.Context) error
-}
-
-func (tj *testJobInterval) Name() string {
-	return "testJobInterval"
-}
-
-func (tj *testJobInterval) Schedule() Schedule {
-	return Every(tj.RunEvery)
-}
-
-func (tj *testJobInterval) Execute(ctx context.Context) error {
-	return tj.RunDelegate(ctx)
-}
 
 func TestRunTask(t *testing.T) {
 	a := assert.New(t)
 
-	ts := worker.NewMockTimeSource()
-	jm := New().WithHighPrecisionHeartbeat().WithTimeSource(ts)
-
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	var runCount int32
-	jm.RunTask(NewTask(func(ctx context.Context) error {
+	New().RunTask(NewTask(func(ctx context.Context) error {
 		defer wg.Done()
 		atomic.AddInt32(&runCount, 1)
 		return nil
@@ -112,64 +34,39 @@ func TestRunTask(t *testing.T) {
 
 func TestRunTaskAndCancel(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
-	jm := New()
+	ts := worker.NewMockTimeSource()
+	start := ts.Now()
+	jm := New().WithTimeSource(ts)
+	didRun := make(chan struct{})
+	didFinish := make(chan struct{})
 
-	didRun := new(AtomicFlag)
-	didFinish := new(AtomicFlag)
 	jm.RunTask(NewTaskWithName("taskToCancel", func(ctx context.Context) error {
-		defer func() {
-			didFinish.Set(true)
-		}()
-		didRun.Set(true)
-		taskElapsed := time.Duration(0)
-		for taskElapsed < 1*time.Second {
+		close(didRun)
+		for {
 			select {
 			case <-ctx.Done():
+				close(didFinish)
 				return nil
 			default:
-				taskElapsed = taskElapsed + 10*time.Millisecond
 				jm.TimeSource().Sleep(10 * time.Millisecond)
 			}
 		}
-
-		return nil
 	}))
-
-	elapsed := time.Duration(0)
-	for elapsed < 1*time.Second {
-		if didRun.Get() {
-			break
-		}
-
-		elapsed = elapsed + 10*time.Millisecond
-		time.Sleep(10 * time.Millisecond)
-	}
-
+	<-didRun
 	jm.CancelTask("taskToCancel")
-	elapsed = time.Duration(0)
-	for elapsed < 1*time.Second {
-		if didFinish.Get() {
-			break
-		}
-
-		elapsed = elapsed + 10*time.Millisecond
-		time.Sleep(10 * time.Millisecond)
-	}
-	a.True(didFinish.Get())
-	a.True(didRun.Get())
+	<-didFinish
+	a.NotZero(ts.Now().Sub(start))
 }
 
 func TestRunJobBySchedule(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
 	didRun := make(chan bool)
-	jm := New()
-	runAt := Now().Add(jm.HeartbeatInterval())
+
+	jm := New().WithTimeSource(worker.NewMockTimeSource())
+	runAt := jm.TimeSource().Now().Add(jm.HeartbeatInterval())
+
 	err := jm.LoadJob(&runAtJob{
 		RunAt: runAt,
 		RunDelegate: func(ctx context.Context) error {
@@ -178,73 +75,71 @@ func TestRunJobBySchedule(t *testing.T) {
 		},
 	})
 	a.Nil(err)
-
 	jm.Start()
 	defer jm.Stop()
 
-	before := Now()
+	jm.TimeSource().Sleep(2 * jm.HeartbeatInterval())
+	before := jm.TimeSource().Now()
 	<-didRun
 
-	a.True(Since(before) < 2*jm.HeartbeatInterval())
+	a.True(jm.TimeSource().Now().Sub(before) < 2*jm.HeartbeatInterval())
 }
 
 func TestDisableJob(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
 	didRun := new(AtomicFlag)
 	runCount := new(AtomicCounter)
-	jm := New()
-	err := jm.LoadJob(&runAtJob{RunAt: time.Now().UTC().Add(100 * time.Millisecond), RunDelegate: func(ctx context.Context) error {
-		runCount.Increment()
-		didRun.Set(true)
-		return nil
-	}})
-	a.Nil(err)
 
-	err = jm.DisableJob(runAtJobName)
+	jm := New()
+	err := jm.LoadJob(&runAtJob{
+		RunDelegate: func(ctx context.Context) error {
+			runCount.Increment()
+			didRun.Set(true)
+			return nil
+		}})
+
 	a.Nil(err)
+	a.Nil(jm.DisableJob(runAtJobName))
 	a.NotEmpty(jm.jobMetas)
+	a.True(jm.IsDisabled(runAtJobName))
 }
 
 func TestSerialTask(t *testing.T) {
 	assert := assert.New(t)
-	assert.StartTimeout(2 * time.Second)
-	defer assert.EndTimeout()
 
-	// test that serial execution actually blocks
 	runCount := new(AtomicCounter)
-	jm := New()
-
+	ts := worker.NewMockTimeSource()
+	jm := New().WithTimeSource(ts)
 	task := NewSerialTaskWithName("test", func(ctx context.Context) error {
 		runCount.Increment()
-		time.Sleep(10 * time.Millisecond)
+		jm.TimeSource().Sleep(10 * time.Millisecond)
 		return nil
 	})
 	jm.RunTask(task)
 	jm.RunTask(task)
-	time.Sleep(100 * time.Millisecond)
+	ts.Sleep(50 * time.Millisecond)
 	assert.Equal(1, runCount.Get())
 
 	// ensure parallel execution is still working as intended
 	task = NewTaskWithName("test1", func(ctx context.Context) error {
 		runCount.Increment()
-		time.Sleep(10 * time.Millisecond)
+		jm.TimeSource().Sleep(10 * time.Millisecond)
 		return nil
 	})
 	runCount = new(AtomicCounter)
 	jm.RunTask(task)
 	jm.RunTask(task)
-	time.Sleep(100 * time.Millisecond)
+	ts.Sleep(50 * time.Millisecond)
 	assert.Equal(2, runCount.Get())
 }
 
 func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 	a := assert.New(t)
 
-	jm := New().WithLogger(logger.All())
-	defer jm.Logger().Close()
+	mt := worker.NewMockTimeSource()
+
+	jm := New().WithTimeSource(mt)
 
 	canceled := new(AtomicFlag)
 	didCancel := new(AtomicFlag)
@@ -253,7 +148,7 @@ func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
-	jm.LoadJob(&testJobWithTimeout{
+	a.Nil(jm.LoadJob(&testJobWithTimeout{
 		TimeoutDuration: 250 * time.Millisecond,
 		RunDelegate: func(ctx context.Context) error {
 			defer wg.Done()
@@ -272,9 +167,12 @@ func TestRunTaskAndCancelWithTimeout(t *testing.T) {
 			cancelCount.Increment()
 			didCancel.Set(true)
 		},
-	})
+	}))
 	jm.Start()
 	defer jm.Stop()
+
+	mt.Sleep(500 * time.Millisecond)
+
 	wg.Wait()
 
 	a.True(didCancel.Get())
@@ -360,11 +258,10 @@ func TestJobManagerStartedListener(t *testing.T) {
 func TestJobManagerCompleteListener(t *testing.T) {
 	assert := assert.New(t)
 
-	jm := New()
+	jm := New().WithTimeSource(worker.NewMockTimeSource())
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
-
 	output := bytes.NewBuffer(nil)
 	agent := logger.New(FlagComplete, logger.Error).WithWriter(
 		logger.NewTextWriter(output).
@@ -394,6 +291,7 @@ func TestJobManagerCompleteListener(t *testing.T) {
 		didRun = true
 		return nil
 	}))
+	jm.TimeSource().Sleep(time.Second)
 	wg.Wait()
 	agent.Drain()
 
@@ -405,11 +303,10 @@ func TestJobManagerCompleteListener(t *testing.T) {
 func TestJobManagerCompleteListenerWithError(t *testing.T) {
 	assert := assert.New(t)
 
-	jm := New()
+	jm := New().WithTimeSource(worker.NewMockTimeSource())
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
-
 	output := bytes.NewBuffer(nil)
 	agent := logger.New(FlagComplete, logger.Error).WithWriter(
 		logger.NewTextWriter(output).
@@ -437,6 +334,7 @@ func TestJobManagerCompleteListenerWithError(t *testing.T) {
 		didRun = true
 		return fmt.Errorf("testError")
 	}))
+	jm.TimeSource().Sleep(time.Second)
 	wg.Wait()
 	agent.Drain()
 
@@ -448,10 +346,8 @@ func TestJobManagerCompleteListenerWithError(t *testing.T) {
 // The goal with this test is to see if panics take down the test process or not.
 func TestJobManagerTaskPanicHandling(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
-	manager := New()
+	manager := New().WithTimeSource(worker.NewMockTimeSource())
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
 	err := manager.RunTask(NewTask(func(ctx context.Context) error {
@@ -466,57 +362,33 @@ func TestJobManagerTaskPanicHandling(t *testing.T) {
 	a.Nil(err)
 }
 
-type testWithEnabled struct {
-	isEnabled bool
-	action    func()
-}
-
-func (twe testWithEnabled) Name() string {
-	return "testWithEnabled"
-}
-
-func (twe testWithEnabled) Schedule() Schedule {
-	return OnDemand()
-}
-
-func (twe testWithEnabled) Enabled() bool {
-	return twe.isEnabled
-}
-
-func (twe testWithEnabled) Execute(ctx context.Context) error {
-	twe.action()
-	return nil
-}
-
 func TestEnabledProvider(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
-	manager := New()
+	manager := New().WithTimeSource(worker.NewMockTimeSource())
 	job := &testWithEnabled{
 		isEnabled: true,
 		action:    func() {},
 	}
 
+	name := "testWithEnabled"
+
 	manager.LoadJob(job)
-	a.False(manager.IsDisabled("testWithEnabled"))
-	manager.DisableJob("testWithEnabled")
-	a.True(manager.IsDisabled("testWithEnabled"))
+	a.False(manager.IsDisabled(name))
+	a.Nil(manager.DisableJob(name))
+	a.True(manager.IsDisabled(name))
 	job.isEnabled = false
-	a.True(manager.IsDisabled("testWithEnabled"))
-	manager.EnableJob("testWithEnabled")
-	a.True(manager.IsDisabled("testWithEnabled"))
+	a.True(manager.IsDisabled(name))
+	a.Nil(manager.EnableJob(name))
+	a.True(manager.IsDisabled(name))
 }
 
 func TestFiresErrorOnTaskError(t *testing.T) {
 	a := assert.New(t)
-	a.StartTimeout(2000 * time.Millisecond)
-	defer a.EndTimeout()
 
 	agent := logger.New(logger.Error)
 	defer agent.Close()
-	manager := New()
+	manager := New().WithTimeSource(worker.NewMockTimeSource())
 	manager.SetLogger(agent)
 
 	var errorDidFire bool
@@ -541,4 +413,100 @@ func TestFiresErrorOnTaskError(t *testing.T) {
 
 	a.True(errorDidFire)
 	a.True(errorMatched)
+}
+
+const (
+	runAtJobName = "runAt"
+)
+
+type runAtJob struct {
+	RunAt       time.Time
+	RunDelegate func(ctx context.Context) error
+}
+
+type runAt time.Time
+
+func (ra runAt) GetNextRunTime(ns NowSource, after *time.Time) *time.Time {
+	return Optional(time.Time(ra))
+}
+
+func (raj *runAtJob) Name() string {
+	return "runAt"
+}
+
+func (raj *runAtJob) Schedule() Schedule {
+	return runAt(raj.RunAt)
+}
+
+func (raj *runAtJob) Execute(ctx context.Context) error {
+	return raj.RunDelegate(ctx)
+}
+
+type testJobWithTimeout struct {
+	RunAt                time.Time
+	TimeoutDuration      time.Duration
+	RunDelegate          func(ctx context.Context) error
+	CancellationDelegate func()
+}
+
+func (tj *testJobWithTimeout) Name() string {
+	return "testJobWithTimeout"
+}
+
+func (tj *testJobWithTimeout) Timeout() time.Duration {
+	return tj.TimeoutDuration
+}
+
+func (tj *testJobWithTimeout) Schedule() Schedule {
+	if !tj.RunAt.IsZero() {
+		return At(tj.RunAt)
+	}
+	return Immediately()
+}
+
+func (tj *testJobWithTimeout) Execute(ctx context.Context) error {
+	return tj.RunDelegate(ctx)
+}
+
+func (tj *testJobWithTimeout) OnCancellation() {
+	tj.CancellationDelegate()
+}
+
+type testJobInterval struct {
+	RunEvery    time.Duration
+	RunDelegate func(ctx context.Context) error
+}
+
+func (tj *testJobInterval) Name() string {
+	return "testJobInterval"
+}
+
+func (tj *testJobInterval) Schedule() Schedule {
+	return Every(tj.RunEvery)
+}
+
+func (tj *testJobInterval) Execute(ctx context.Context) error {
+	return tj.RunDelegate(ctx)
+}
+
+type testWithEnabled struct {
+	isEnabled bool
+	action    func()
+}
+
+func (twe testWithEnabled) Name() string {
+	return "testWithEnabled"
+}
+
+func (twe testWithEnabled) Schedule() Schedule {
+	return OnDemand()
+}
+
+func (twe testWithEnabled) Enabled() bool {
+	return twe.isEnabled
+}
+
+func (twe testWithEnabled) Execute(ctx context.Context) error {
+	twe.action()
+	return nil
 }

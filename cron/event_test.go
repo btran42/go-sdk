@@ -32,7 +32,6 @@ func TestEventStartedListener(t *testing.T) {
 
 	all.Listen(FlagStarted, "default", NewEventListener(func(e *Event) {
 		defer wg.Done()
-
 		assert.Equal(FlagStarted, e.Flag())
 		assert.False(e.Timestamp().IsZero())
 		assert.Equal("test_task", e.TaskName())

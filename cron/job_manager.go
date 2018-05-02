@@ -343,7 +343,7 @@ func (jm *JobManager) runDueJobs() error {
 		if !nextRunTime.IsZero() {
 			if jm.shouldRunJob(job) {
 				if nextRunTime.Before(now) {
-					newNext := Deref(meta.Schedule.GetNextRunTime(&now))
+					newNext := Deref(meta.Schedule.GetNextRunTime(jm.timeSource, &now))
 					jm.jobMetas[jobName].NextRunTime = newNext
 					jm.jobMetas[jobName].LastRunTime = now
 					jm.debugf("scheduling %s for %v from now", jobName, newNext.Sub(now))
@@ -416,6 +416,7 @@ func (jm *JobManager) killHangingTasks() (err error) {
 		}
 
 		now := jm.timeSource.Now()
+
 		if jobMeta, hasJobMeta := jm.jobMetas[taskName]; hasJobMeta {
 			nextRuntime := jobMeta.NextRunTime
 
@@ -479,11 +480,18 @@ func (jm *JobManager) loadJobUnsafe(j Job) error {
 
 	schedule := j.Schedule()
 	jm.jobs[jobName] = j
-	jm.jobMetas[jobName] = &JobMeta{
+
+	meta := &JobMeta{
 		Name:        jobName,
-		NextRunTime: Deref(schedule.GetNextRunTime(nil)),
+		NextRunTime: Deref(schedule.GetNextRunTime(jm.timeSource, nil)),
 		Schedule:    schedule,
 	}
+
+	if typed, isTyped := j.(EnabledProvider); isTyped {
+		meta.EnabledProvider = typed.Enabled
+	}
+
+	jm.jobMetas[jobName] = meta
 	return nil
 }
 

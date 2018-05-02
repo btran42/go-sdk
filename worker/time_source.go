@@ -1,6 +1,9 @@
 package worker
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // TimeSource is a provider for time stuff.
 type TimeSource interface {
@@ -36,31 +39,43 @@ func NewMockTimeSource() *MockTimeSource {
 
 // MockTimeSource is a mocked time source.
 type MockTimeSource struct {
+	sync.Mutex
 	Current time.Time
 	Tickers []*mockTicker
 }
 
 // Now returns the current mock time.
-func (mts *MockTimeSource) Now() time.Time {
-	return mts.Current
+func (mts *MockTimeSource) Now() (current time.Time) {
+	mts.Lock()
+	current = mts.Current
+	mts.Unlock()
+	return
 }
 
 // Sleep advances the mock time by a given duration.
 func (mts *MockTimeSource) Sleep(d time.Duration) {
+	mts.Lock()
 	mts.Current = mts.Current.Add(d)
+	mts.Unlock()
+
 	for _, mt := range mts.Tickers {
 		mt.Advance(d)
 	}
 }
 
-// Tick implements a mock ticker.
-func (mts *MockTimeSource) Tick(d time.Duration) <-chan time.Time {
+// Tick returns a mock ticker.
+func (mts *MockTimeSource) Tick(d time.Duration) (tick <-chan time.Time) {
+	mts.Lock()
 	ticker := &mockTicker{Current: mts.Current, Interval: d, Tick: make(chan time.Time)}
 	mts.Tickers = append(mts.Tickers, ticker)
-	return ticker.Tick
+	tick = ticker.Tick
+	mts.Unlock()
+	return
 }
 
 type mockTicker struct {
+	sync.Mutex
+
 	// Interval is the ticker interval.
 	Interval time.Duration
 	// Last is the last time the ticker fired.
@@ -73,6 +88,8 @@ type mockTicker struct {
 
 // Advance fires the ticker for each `Interval` until the duration is satisfied.
 func (mt *mockTicker) Advance(d time.Duration) {
+	mt.Lock()
+
 	if mt.Last.IsZero() {
 		mt.Tick <- mt.Current
 		mt.Last = mt.Current
@@ -86,4 +103,5 @@ func (mt *mockTicker) Advance(d time.Duration) {
 		mt.Tick <- mt.Current
 	}
 	mt.Current = end
+	mt.Unlock()
 }

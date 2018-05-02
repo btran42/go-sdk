@@ -394,17 +394,6 @@ func (l *Logger) SyncTrigger(e Event) {
 	l.trigger(false, e)
 }
 
-func (l *Logger) fastGetWorkers(flag Flag) (workers map[string]*Worker) {
-	l.workersLock.Lock()
-	if l.workers != nil {
-		if flagWorkers, hasWorkers := l.workers[flag]; hasWorkers {
-			workers = flagWorkers
-		}
-	}
-	l.workersLock.Unlock()
-	return
-}
-
 func (l *Logger) trigger(async bool, e Event) {
 	if !async && l.recoverPanics {
 		defer func() {
@@ -420,7 +409,6 @@ func (l *Logger) trigger(async bool, e Event) {
 
 	flag := e.Flag()
 	if l.IsEnabled(flag) {
-		// inject the logger heading
 		if l.heading != "" {
 			if typed, isTyped := e.(EventHeadings); isTyped {
 				if len(typed.Headings()) > 0 {
@@ -431,7 +419,14 @@ func (l *Logger) trigger(async bool, e Event) {
 			}
 		}
 
-		workers := l.fastGetWorkers(flag)
+		var workers map[string]*Worker
+		l.workersLock.Lock()
+		if l.workers != nil {
+			if flagWorkers, hasWorkers := l.workers[flag]; hasWorkers {
+				workers = flagWorkers
+			}
+		}
+		l.workersLock.Unlock()
 		for _, worker := range workers {
 			if async {
 				worker.Work <- e
@@ -624,12 +619,11 @@ func (l *Logger) Close() (err error) {
 	}
 	l.workers = nil
 
-	if l.writeWorker != nil {
-		l.writeWorkerLock.Lock()
-		defer l.writeWorkerLock.Unlock()
-		l.writeWorker.Close()
-		l.writeWorker = nil
-	}
+	l.writeWorkerLock.Lock()
+	defer l.writeWorkerLock.Unlock()
+
+	l.writeWorker.Close()
+	l.writeWorker = nil
 
 	return nil
 }
@@ -644,12 +638,13 @@ func (l *Logger) Drain() error {
 			worker.Drain()
 		}
 	}
+
+	l.writeWorkerLock.Lock()
+	defer l.writeWorkerLock.Unlock()
+
 	if l.writeWorker != nil {
-		l.writeWorkerLock.Lock()
-		defer l.writeWorkerLock.Unlock()
-		if l.writeWorker != nil {
-			l.writeWorker.Drain()
-		}
+		l.writeWorker.Drain()
 	}
+
 	return nil
 }

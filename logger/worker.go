@@ -20,16 +20,22 @@ func NewWorker(parent *Logger, listener Listener) *Worker {
 
 // Worker is an agent that processes a listener.
 type Worker struct {
+	sync.Mutex
 	Parent   *Logger
 	Listener Listener
 	Abort    chan struct{}
 	Aborted  chan struct{}
 	Work     chan Event
-	SyncRoot sync.Mutex
 }
 
 // Start starts the worker.
 func (w *Worker) Start() {
+	w.Lock()
+	w.startUnsafe()
+	w.Unlock()
+}
+
+func (w *Worker) startUnsafe() {
 	w.Abort = make(chan struct{})
 	w.Aborted = make(chan struct{})
 	go w.ProcessLoop()
@@ -65,32 +71,40 @@ func (w *Worker) Process(e Event) {
 
 // Stop stops the worker.
 func (w *Worker) Stop() {
+	w.Lock()
 	close(w.Abort)
 	<-w.Aborted
+	w.Unlock()
 }
 
 // Drain stops the worker and synchronously processes any remaining work.
 // It then restarts the worker.
 func (w *Worker) Drain() {
-	w.SyncRoot.Lock()
-	defer w.SyncRoot.Unlock()
+	w.Lock()
+	defer w.Unlock()
 
-	w.Stop()
+	close(w.Abort)
+	<-w.Aborted
+
 	for len(w.Work) > 0 {
 		w.Process(<-w.Work)
 	}
-	w.Start()
+
+	w.startUnsafe()
 }
 
 // Close closes the worker.
 func (w *Worker) Close() error {
-	w.SyncRoot.Lock()
-	defer w.SyncRoot.Unlock()
+	w.Lock()
+	defer w.Unlock()
 
-	w.Stop()
+	close(w.Abort)
+	<-w.Aborted
+
 	for len(w.Work) > 0 {
 		w.Process(<-w.Work)
 	}
 	close(w.Work)
+
 	return nil
 }

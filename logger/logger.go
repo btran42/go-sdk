@@ -394,6 +394,17 @@ func (l *Logger) SyncTrigger(e Event) {
 	l.trigger(false, e)
 }
 
+func (l *Logger) fastGetWorkers(flag Flag) (workers map[string]*Worker) {
+	l.workersLock.Lock()
+	if l.workers != nil {
+		if flagWorkers, hasWorkers := l.workers[flag]; hasWorkers {
+			workers = flagWorkers
+		}
+	}
+	l.workersLock.Unlock()
+	return
+}
+
 func (l *Logger) trigger(async bool, e Event) {
 	if !async && l.recoverPanics {
 		defer func() {
@@ -420,15 +431,12 @@ func (l *Logger) trigger(async bool, e Event) {
 			}
 		}
 
-		if l.workers != nil {
-			if workers, hasWorkers := l.workers[flag]; hasWorkers {
-				for _, worker := range workers {
-					if async {
-						worker.Work <- e
-					} else {
-						worker.Listener(e)
-					}
-				}
+		workers := l.fastGetWorkers(flag)
+		for _, worker := range workers {
+			if async {
+				worker.Work <- e
+			} else {
+				worker.Listener(e)
 			}
 		}
 

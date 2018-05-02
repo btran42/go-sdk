@@ -426,6 +426,7 @@ func TestLoggerFatal(t *testing.T) {
 
 	log := New().WithFlags(AllFlags()).WithWriter(writer)
 	defer log.Close()
+
 	log.Fatal(fmt.Errorf("foo %s", "bar"))
 	log.Drain()
 	assert.Empty(stdout.String())
@@ -436,8 +437,13 @@ func TestLoggerSyncFatalf(t *testing.T) {
 	assert := assert.New(t)
 
 	buffer := bytes.NewBuffer(nil)
-	log := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer).WithShowTimestamp(false).WithUseColor(false))
+	log := New().
+		WithFlags(AllFlags()).
+		WithWriter(NewTextWriter(buffer).
+			WithShowTimestamp(false).
+			WithUseColor(false))
 	defer log.Close()
+
 	log.SyncFatalf("foo %s", "bar")
 	assert.Equal("[fatal] foo bar\n", buffer.String())
 }
@@ -446,8 +452,14 @@ func TestLoggerSyncFatal(t *testing.T) {
 	assert := assert.New(t)
 
 	buffer := bytes.NewBuffer(nil)
-	log := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer).WithShowTimestamp(false).WithUseColor(false))
+	log := New().
+		WithFlags(AllFlags()).
+		WithWriter(NewTextWriter(buffer).
+			WithShowTimestamp(false).
+			WithUseColor(false))
+
 	defer log.Close()
+
 	log.SyncFatal(fmt.Errorf("foo %s", "bar"))
 	assert.Equal("[fatal] foo bar\n", buffer.String())
 }
@@ -524,7 +536,12 @@ func TestLoggerEventEnabled(t *testing.T) {
 	defer assert.EndTimeout()
 
 	buffer := bytes.NewBuffer(nil)
-	log := New().WithFlags(AllFlags()).WithWriter(NewTextWriter(buffer).WithShowTimestamp(false).WithUseColor(false))
+	log := New().
+		WithFlags(AllFlags()).
+		WithWriter(NewTextWriter(buffer).
+			WithShowTimestamp(false).
+			WithUseColor(false))
+
 	defer log.Close()
 
 	output := make(chan enabledEvent)

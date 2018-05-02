@@ -24,6 +24,7 @@ func TestHealthz(t *testing.T) {
 
 	hzLog := logger.New().WithFlags(logger.AllFlags())
 	defer hzLog.Close()
+
 	hz := NewHealthz(app).WithBindAddr("127.0.0.1:0").WithLogger(hzLog)
 	defer hz.Shutdown()
 

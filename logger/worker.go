@@ -51,7 +51,7 @@ func (w *Worker) ProcessLoop() {
 
 // Process calls the listener for an event.
 func (w *Worker) Process(e Event) {
-	if w.Parent.RecoversPanics() {
+	if w.Parent != nil && w.Parent.RecoversPanics() {
 		defer func() {
 			if r := recover(); r != nil {
 				if w.Parent != nil {

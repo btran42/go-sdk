@@ -16,6 +16,7 @@ import (
 func New() *Raft {
 	return &Raft{
 		id:                  uuid.V4().String(),
+		timeSource:          worker.SystemTimeSource{},
 		state:               Follower,
 		bindAddr:            DefaultBindAddr,
 		electionTimeout:     DefaultElectionTimeout,
@@ -38,10 +39,11 @@ func NewFromConfig(cfg *Config) *Raft {
 // Raft represents a raft node and all the state machine
 // componentry required.
 type Raft struct {
-	id       string
-	log      *logger.Logger
-	selfAddr string
-	bindAddr string
+	id         string
+	log        *logger.Logger
+	selfAddr   string
+	bindAddr   string
+	timeSource worker.TimeSource
 
 	electionTimeout time.Duration
 
@@ -136,7 +138,7 @@ func (r *Raft) LeaderCheck() error {
 	})
 
 	if currentState == Follower {
-		now := time.Now().UTC()
+		now := r.timeSource.Now()
 		// if we've never elected a leader, or if the current leader hasn't sent a heartbeat in a while ...
 		if r.lastLeaderContact.IsZero() || now.Sub(lastLeaderContact) > RandomTimeout(r.electionTimeout) {
 			// trigger an election.
@@ -158,7 +160,7 @@ func (r *Raft) Election() error {
 	})
 	r.transitionTo(Candidate)
 
-	started := time.Now()
+	started := r.timeSource.Now()
 	for {
 
 		// if we've been bumped out of candidate state,
@@ -475,6 +477,17 @@ func (r *Raft) HeartbeatInterval() time.Duration {
 	return r.heartbeatInterval
 }
 
+// WithTimeSource sets the raft time source.
+func (r *Raft) WithTimeSource(ts worker.TimeSource) *Raft {
+	r.timeSource = ts
+	return r
+}
+
+// TimeSource returns the raft time source.
+func (r *Raft) TimeSource() worker.TimeSource {
+	return r.timeSource
+}
+
 // --------------------------------------------------------------------------------
 // utility methods.
 // --------------------------------------------------------------------------------
@@ -505,6 +518,10 @@ func (r *Raft) processRequestVoteResults(results chan *RequestVoteResults) Elect
 //  0 == tie
 // -1 == loss
 func (r *Raft) voteOutcome(votesFor, total int) ElectionOutcome {
+	if total < 2 {
+		return ElectionLoss
+	}
+
 	majority := total >> 1
 	if total%2 == 0 {
 		if votesFor > majority {

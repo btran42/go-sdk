@@ -4,7 +4,30 @@ import "github.com/blend/go-sdk/logger"
 
 var (
 	_ Client = &MockTransport{}
+	_ Client = NoOpTransport("")
 )
+
+// NoOpTransport implements client but does nothing.
+type NoOpTransport string
+
+// Open implements Client.
+func (t NoOpTransport) Open() error { return nil }
+
+// Close implements Client.
+func (t NoOpTransport) Close() error { return nil }
+
+// RemoteAddr implements Client.
+func (t NoOpTransport) RemoteAddr() string { return string(t) }
+
+// AppendEntries implements Client.
+func (t NoOpTransport) AppendEntries(args *AppendEntries) (*AppendEntriesResults, error) {
+	return nil, nil
+}
+
+// RequestVote implements Client.
+func (t NoOpTransport) RequestVote(args *RequestVote) (*RequestVoteResults, error) {
+	return nil, nil
+}
 
 // NewMockTransport returns a new mock transport
 func NewMockTransport(remoteAddress string, peer Server) *MockTransport {

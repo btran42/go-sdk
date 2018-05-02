@@ -34,6 +34,11 @@ func (qw *Queue) MaxWork() int {
 	return qw.maxWork
 }
 
+// Running returns if the worker is running.
+func (qw *Queue) Running() bool {
+	return qw.latch.IsRunning()
+}
+
 // Latch returns the worker latch.
 func (qw *Queue) Latch() *Latch {
 	return qw.latch

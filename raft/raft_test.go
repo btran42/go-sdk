@@ -1,12 +1,10 @@
 package raft
 
 import (
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/blend/go-sdk/assert"
-	"github.com/blend/go-sdk/uuid"
+	"github.com/blend/go-sdk/worker"
 )
 
 func TestRaftCountVotes(t *testing.T) {
@@ -18,7 +16,7 @@ func TestRaftCountVotes(t *testing.T) {
 	assert.Equal(-1, r.voteOutcome(1, 0))
 
 	assert.Equal(-1, r.voteOutcome(0, 1))
-	assert.Equal(1, r.voteOutcome(1, 1))
+	assert.Equal(-1, r.voteOutcome(1, 1))
 
 	assert.Equal(-1, r.voteOutcome(0, 2))
 	assert.Equal(0, r.voteOutcome(1, 2))
@@ -42,70 +40,34 @@ func TestRaftCountVotes(t *testing.T) {
 	assert.Equal(1, r.voteOutcome(4, 4))
 }
 
-func createTestNode() *Raft {
-	return New().
-		WithID(uuid.V4().String()).
-		WithLeaderCheckInterval(time.Microsecond).
-		WithHeartbeatInterval(time.Microsecond).
-		WithElectionTimeout(time.Microsecond).
-		WithServer(NewMockServer())
-}
-
-func createCluster(nodeCount int) []*Raft {
-	if nodeCount <= 0 {
-		return nil
-	}
-	if nodeCount == 1 {
-		return []*Raft{createTestNode()}
-	}
-
-	// create all the nodes
-	peers := make([]*Raft, nodeCount)
-	for index := 0; index < nodeCount; index++ {
-		peers[index] = createTestNode()
-	}
-
-	// cross wire all the nodes
-	for i := 0; i < nodeCount; i++ {
-		for j := 0; j < nodeCount; j++ {
-			if i != j {
-				peers[i].WithPeer(NewMockTransport(peers[j].ID(), peers[j].Server()))
-			}
-		}
-	}
-	return peers
-}
-
-func TestRaftSingleNode(t *testing.T) {
+func TestRaftSoloStart(t *testing.T) {
 	assert := assert.New(t)
-	assert.StartTimeout(time.Millisecond)
-	defer assert.EndTimeout()
 
-	cluster := createCluster(1)[0]
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	var didTransitionToLeader bool
-	cluster.SetLeaderHandler(func() {
-		defer wg.Done()
-		didTransitionToLeader = true
-	})
-	go func() { cluster.Start() }()
-	defer cluster.Stop()
-	wg.Wait()
-	assert.True(didTransitionToLeader)
+	solo := New()
+	solo.Start()
+	assert.Empty(solo.Peers())
+	assert.Nil(solo.Server())
+	assert.Equal(Leader, solo.State())
+	assert.Nil(solo.leaderCheckTicker)
+	assert.Nil(solo.heartbeatTicker)
 }
 
-func TestRaftCluster(t *testing.T) {
-	t.SkipNow()
-
+func TestRaftStart(t *testing.T) {
+	t.Skip()
 	assert := assert.New(t)
-	assert.StartTimeout(time.Millisecond)
-	defer assert.EndTimeout()
 
-	cluster := createCluster(3)
-	for _, node := range cluster {
-		assert.Nil(node.Start())
-		defer node.Stop()
-	}
+	node := New().WithTimeSource(worker.NewMockTimeSource())
+	node.WithServer(NewMockServer())
+	node.WithPeer(NoOpTransport("one"))
+	node.WithPeer(NoOpTransport("two"))
+	node.WithPeer(NoOpTransport("three"))
+
+	node.Start()
+	defer node.Stop()
+
+	assert.NotNil(node.Server())
+	assert.Len(node.Peers(), 3)
+
+	assert.True(node.leaderCheckTicker.Running())
+	assert.True(node.heartbeatTicker.Running())
 }

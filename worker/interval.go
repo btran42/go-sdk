@@ -44,6 +44,11 @@ func (i Interval) Interval() time.Duration {
 	return i.interval
 }
 
+// Running returns if the worker is running.
+func (i *Interval) Running() bool {
+	return i.latch.IsRunning()
+}
+
 // Latch returns the inteval worker latch.
 func (i *Interval) Latch() *Latch {
 	return i.latch
